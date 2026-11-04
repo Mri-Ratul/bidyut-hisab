@@ -288,16 +288,11 @@
           <span>📊</span> এনালাইসিস
         </button>
 
-        <!-- Dropdown + Print Combined Group -->
-        <div class="flex items-center bg-white/15 rounded-lg p-0.5 shadow-sm">
-          <select id="billingModelSelect" onchange="calculateBill(); saveToLocalStorage();" class="bg-transparent text-white text-xs font-semibold px-2 py-1 outline-none cursor-pointer border-r border-white/20 hover:bg-white/10 rounded-l-md transition" title="বিল বণ্টনের মডেল নির্বাচন করুন">
-            <option value="sajen_extra" class="text-slate-800 font-medium">মডেল: সাজেন অতিরিক্ত ৫০% (অক্সিজেন সমন্বয়)</option>
-            <option value="equal_split" class="text-slate-800 font-medium">মডেল: সমান চার ভাগ (স্বাভাবিক অবস্থা)</option>
-          </select>
-          <button onclick="window.print()" class="text-white hover:bg-white/20 text-xs font-semibold px-2.5 py-1 rounded-r-md transition flex items-center gap-1">
-            <span>🖨️</span> A4 প্রিন্ট
-          </button>
-        </div>
+        <!-- Billing Mode Selector (Short & Clean) -->
+<select id="billingModelSelect" onchange="calculateBill(); saveToLocalStorage();" class="bg-white/15 hover:bg-white/25 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg transition outline-none cursor-pointer shadow-sm">
+  <option value="sajen_extra" class="text-slate-800 font-medium">সাজেন ৫০%</option>
+  <option value="equal_split" class="text-slate-800 font-medium">সমান ভাগ</option>
+</select>
 
         <button onclick="downloadContainer('full-summary-sheet', 'Full_Electricity_Statement.png')" class="bg-amber-400 hover:bg-amber-500 text-slate-900 text-xs font-bold px-3 py-1.5 rounded-lg transition flex items-center gap-1 shadow">
           <span>🖼️</span> শিট ছবি (PNG)
