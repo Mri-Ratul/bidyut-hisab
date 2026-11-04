@@ -1,0 +1,1563 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bidyut Bill Calculator (4-Room Sub-Meter)</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Stable HTML2Canvas Engine -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  
+  <!-- Google Fonts: Hind Siliguri -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Hind Siliguri', sans-serif;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1.15;
+    }
+    .statement-table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    .statement-table th, .statement-table td {
+      border: 1px solid #e2e8f0;
+      white-space: nowrap;
+    }
+    input[type=number]::-webkit-inner-spin-button, 
+    input[type=number]::-webkit-outer-spin-button { 
+      -webkit-appearance: none; 
+      margin: 0; 
+    }
+    input[type=number] { -moz-appearance: textfield; }
+
+    @media print {
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+      body { background: white !important; color: black !important; padding: 0 !important; }
+      #full-summary-sheet {
+        box-shadow: none !important;
+        margin: 0 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        padding: 0 !important;
+        border: none !important;
+      }
+    }
+  </style>
+
+  <!-- Firebase SDK (v10 Modular via CDN) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { 
+      getFirestore, 
+      collection, 
+      addDoc, 
+      getDocs, 
+      query, 
+      orderBy, 
+      deleteDoc, 
+      doc, 
+      serverTimestamp 
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    // --- Firebase Configuration ---
+    // ফায়ারবেস কনসোল থেকে পাওয়া তথ্যগুলো এখানে পেস্ট করুন:
+   const firebaseConfig = {
+  apiKey: "AIzaSyAo2ZarPhhsRcnHRVhz6UffgfC-kz1wfus",
+  authDomain: "bidyut-hisab.firebaseapp.com",
+  projectId: "bidyut-hisab",
+  storageBucket: "bidyut-hisab.firebasestorage.app",
+  messagingSenderId: "108347629308",
+  appId: "1:108347629308:web:317f4d42498d5277818179",
+  measurementId: "G-2G7CYFMV9Y"
+};
+
+    let db = null;
+    try {
+      if (firebaseConfig.apiKey !== "YOUR_API_KEY") {
+        const app = initializeApp(firebaseConfig);
+        db = getFirestore(app);
+      }
+    } catch (err) {
+      console.error("Firebase Init Error:", err);
+    }
+
+    // ক্লাউডে নতুন বিল সেভ করার মেথড
+    window.saveBillToFirestore = async function() {
+      const state = window.collectFullState();
+      const saveBtn = document.getElementById('btnSaveFirestore');
+      const originalText = saveBtn.innerHTML;
+
+      if (!db) {
+        window.showToast("ফায়ারবেস কনফিগারেশন সেট করা হয়নি!", "⚠️");
+        return;
+      }
+
+      try {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = `<span>⏳</span> সেভ হচ্ছে...`;
+
+        const p = window.parseDateParts(state.prevDate);
+        const c = window.parseDateParts(state.currDate);
+        let cycleName = "সাধারণ বিল হিসাব";
+        if (p && c) {
+          cycleName = `${p.day} ${window.bengaliMonths[p.monthIndex]} - ${c.day} ${window.bengaliMonths[c.monthIndex]}, ${c.year}`;
+        } else if (c) {
+          cycleName = `${c.day} ${window.bengaliMonths[c.monthIndex]}, ${c.year}`;
+        }
+
+        const billRecord = {
+          ...state,
+          cycleTitle: cycleName,
+          createdAt: serverTimestamp(),
+          clientDate: new Date().toISOString()
+        };
+
+        await addDoc(collection(db, "monthly_bills"), billRecord);
+        window.showToast("বিল সফলভাবে ফায়ারবেসে সেভ হয়েছে!", "✅");
+      } catch (e) {
+        console.error("Firestore Save Error:", e);
+        window.showToast("ডাটা সেভ করতে সমস্যা হয়েছে!", "❌");
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+      }
+    };
+
+    // পূর্ববর্তী মাসের হিস্ট্রি পপআপ ওপেন ও ফেচ করা
+    window.openHistoryModal = async function() {
+      const modal = document.getElementById('historyModal');
+      const listContainer = document.getElementById('historyListContainer');
+      modal.classList.remove('hidden');
+
+      if (!db) {
+        listContainer.innerHTML = `
+          <div class="text-center py-8 text-slate-500">
+            <p class="text-amber-600 font-bold mb-1">⚠️ ফায়ারবেস কনফিগ পাওয়া যায়নি</p>
+            <p class="text-xs">এইচটিএমএল ফাইলে আপনার ফায়ারবেস প্রোজেক্ট ক্রেডেনশিয়াল বসিয়ে নিলেই হিস্ট্রি দেখা যাবে।</p>
+          </div>
+        `;
+        return;
+      }
+
+      listContainer.innerHTML = `
+        <div class="text-center py-8 text-slate-500 text-xs">
+          <span>⏳</span> ডাটা লোড হচ্ছে, অনুগ্রহ করে অপেক্ষা করুন...
+        </div>
+      `;
+
+      try {
+        const q = query(collection(db, "monthly_bills"), orderBy("createdAt", "desc"));
+        const querySnapshot = await getDocs(q);
+
+        if (querySnapshot.empty) {
+          listContainer.innerHTML = `
+            <div class="text-center py-8 text-slate-400 text-xs">
+              এখনও কোনো পূর্ববর্তী মাসের বিল সংরক্ষিত নেই।
+            </div>
+          `;
+          return;
+        }
+
+        let html = '';
+        window.currentHistoryData = {};
+
+        querySnapshot.forEach((docSnap) => {
+          const item = docSnap.data();
+          const docId = docSnap.id;
+          window.currentHistoryData[docId] = item;
+
+          const savedDate = item.clientDate ? new Date(item.clientDate).toLocaleDateString('bn-BD', { year: 'numeric', month: 'short', day: 'numeric' }) : '--';
+
+          html += `
+            <div class="bg-slate-50 hover:bg-indigo-50/50 p-4 rounded-xl border border-slate-200 transition flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h4 class="font-bold text-slate-800 text-sm flex items-center gap-2">
+                  <span>📄</span> ${item.cycleTitle || 'মাসিক বিল বিবরণ'}
+                </h4>
+                <p class="text-xs text-slate-500 mt-0.5">সংরক্ষণের তারিখ: ${savedDate}</p>
+              </div>
+
+              <div class="flex items-center gap-2">
+                <button onclick="loadBillRecord('${docId}')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-sm flex items-center gap-1">
+                  <span>📥</span> ভিউ / লোড
+                </button>
+                <button onclick="deleteBillRecord('${docId}')" class="bg-rose-100 hover:bg-rose-200 text-rose-700 text-xs font-bold px-2.5 py-1.5 rounded-lg transition" title="মুছুন">
+                  <span>🗑️</span>
+                </button>
+              </div>
+            </div>
+          `;
+        });
+
+        listContainer.innerHTML = html;
+      } catch (err) {
+        console.error("Firestore Fetch Error:", err);
+        listContainer.innerHTML = `
+          <div class="text-center py-8 text-rose-600 text-xs font-bold">
+            ডাটা লোড করতে ব্যর্থ হয়েছে। ফায়ারস্টোর রুলস ও নেটওয়ার্ক চেক করুন।
+          </div>
+        `;
+      }
+    };
+
+    window.loadBillRecord = function(docId) {
+      if (window.currentHistoryData && window.currentHistoryData[docId]) {
+        const record = window.currentHistoryData[docId];
+        window.applyFullState(record);
+        window.closeHistoryModal();
+        window.showToast("পূর্ববর্তী মাসের বিল সফলভাবে লোড হয়েছে!", "✅");
+      }
+    };
+
+    window.deleteBillRecord = async function(docId) {
+      if (!confirm("আপনি কি নিশ্চিতভাবে এই মাসের বিল রেকর্ডটি মুছে ফেলতে চান?")) return;
+      if (!db) return;
+
+      try {
+        await deleteDoc(doc(db, "monthly_bills", docId));
+        window.showToast("বিল রেকর্ড মুছে ফেলা হয়েছে!", "🗑️");
+        window.openHistoryModal();
+      } catch (e) {
+        console.error("Delete Error:", e);
+        window.showToast("মুছতে সমস্যা হয়েছে!", "❌");
+      }
+    };
+
+    window.closeHistoryModal = function() {
+      document.getElementById('historyModal').classList.add('hidden');
+    };
+  </script>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen pb-24">
+
+  <!-- Top Navigation Bar -->
+  <header class="bg-gradient-to-r from-blue-700 via-indigo-700 to-cyan-700 text-white py-3.5 shadow-md no-print sticky top-0 z-50">
+    <div class="max-w-6xl mx-auto px-4 flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h1 class="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2">
+          <span>⚡</span> ৪-রুম বিদ্যুৎ বিল ক্যালকুলেটর
+        </h1>
+        <p class="text-blue-100 text-xs mt-0.5">মেইন মিটার, সাব-মিটারিং ও দেনা-পাওনা সমন্বয় হিসাব</p>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="flex flex-wrap items-center gap-2">
+        <button onclick="openHistoryModal()" title="পূর্ববর্তী সকল মাসের সংরক্ষিত বিল দেখুন ও লোড করুন" class="bg-white/15 hover:bg-white/25 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 shadow-sm">
+          <span>📜</span> পূর্ববর্তী মাসের ডাটা
+        </button>
+
+        <button id="btnSaveFirestore" onclick="saveBillToFirestore()" title="বর্তমান বিল সরাসরি ফায়ারস্টোরে সেভ করুন" class="bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 shadow">
+          <span>☁️</span> ক্লাউডে সেভ করুন
+        </button>
+
+        <button onclick="window.print()" class="bg-white/15 hover:bg-white/25 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition flex items-center gap-1 shadow-sm">
+          <span>🖨️</span> A4 প্রিন্ট
+        </button>
+
+        <button onclick="downloadContainer('full-summary-sheet', 'Full_Electricity_Statement.png')" class="bg-amber-400 hover:bg-amber-500 text-slate-900 text-xs font-bold px-3 py-1.5 rounded-lg transition flex items-center gap-1 shadow">
+          <span>🖼️</span> শিট ছবি (PNG)
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- History Modal Popup -->
+  <div id="historyModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-6 border border-slate-200 flex flex-col max-h-[85vh]">
+      <div class="flex items-center justify-between border-b border-slate-200 pb-3 mb-4">
+        <div>
+          <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+            <span>📜</span> পূর্ববর্তী মাসের সংরক্ষিত বিলসমূহ
+          </h3>
+          <p class="text-xs text-slate-500">যে কোনো মাসের তথ্য সিলেক্ট করে সরাসরি ক্যালকুলেটরে দেখতে পারবেন</p>
+        </div>
+        <button onclick="closeHistoryModal()" class="text-slate-400 hover:text-slate-700 text-xl font-bold px-2">✕</button>
+      </div>
+
+      <div id="historyListContainer" class="overflow-y-auto space-y-2.5 flex-1 pr-1"></div>
+
+      <div class="border-t border-slate-200 pt-3 mt-4 text-right">
+        <button onclick="closeHistoryModal()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold px-4 py-2 rounded-xl transition">
+          বন্ধ করুন
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <main class="max-w-6xl mx-auto px-4 mt-6 space-y-6">
+
+    <div id="toastMessage" class="hidden fixed bottom-5 right-5 z-50 bg-slate-900 text-white text-xs font-bold px-4 py-3 rounded-xl shadow-xl border border-slate-700 transition-all flex items-center gap-2">
+      <span id="toastIcon">✅</span>
+      <span id="toastText">ডাটা সফলভাবে সংরক্ষিত হয়েছে!</span>
+    </div>
+
+    <!-- Section 1: Dates & Recharge Transactions -->
+    <div class="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-slate-200 no-print">
+      <div class="border-b border-slate-200 pb-3 mb-4 flex flex-wrap justify-between items-center gap-2">
+        <div>
+          <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+            <span class="text-indigo-600">📅</span> ১. বিলিং সময়কাল ও টাকা ভরার বিবরণী
+          </h2>
+          <p class="text-xs text-slate-500">কার্ডে কে কত টাকা দিয়েছেন তা নির্দিষ্ট করুন</p>
+        </div>
+      </div>
+
+      <!-- Universal Billing Dates -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+        <div class="bg-slate-50 p-3 rounded-xl border border-slate-200">
+          <label class="block text-xs font-bold text-slate-700 mb-1">পূর্ববর্তী রিডিংয়ের তারিখ</label>
+          <input type="date" id="prevDate" onfocus="handleDateFocus('prevDate', -1)" onclick="handleDateFocus('prevDate', -1)" oninput="handleDateChange()" class="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs sm:text-sm font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm cursor-pointer">
+        </div>
+        <div class="bg-slate-50 p-3 rounded-xl border border-slate-200">
+          <label class="block text-xs font-bold text-slate-700 mb-1">বর্তমান রিডিংয়ের তারিখ</label>
+          <input type="date" id="currDate" onfocus="handleDateFocus('currDate', 0)" onclick="handleDateFocus('currDate', 0)" oninput="handleDateChange()" class="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs sm:text-sm font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm cursor-pointer">
+        </div>
+      </div>
+
+      <!-- 3 Dynamic Recharge Cards -->
+      <div class="border-t border-slate-200 pt-4">
+        <div class="flex flex-wrap justify-between items-center gap-2 mb-3">
+          <div>
+            <h3 class="font-bold text-slate-800 text-sm">💳 রিচার্জ বিবরণ ও প্রদানকারী (Contributors)</h3>
+            <p class="text-xs text-slate-500">হাজারে ১০৳ হারে এজেন্ট ফি ও স্বয়ংক্রিয় ৫% ভ্যাট হিসাব হবে</p>
+          </div>
+          <button type="button" onclick="addRechargeRow()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition flex items-center gap-1 shadow-sm">
+            <span>+</span> রিচার্জ এন্ট্রি যোগ করুন
+          </button>
+        </div>
+
+        <div id="rechargeCardsContainer" class="space-y-3"></div>
+      </div>
+
+      <!-- Fixed Charges Configuration -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-5 bg-blue-50/50 p-3.5 rounded-xl border border-blue-100 text-xs">
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">মিটার চার্জ (টাকা)</label>
+          <input type="number" id="meterCharge" value="40" step="any" oninput="calculateBill()" class="w-full bg-white border border-slate-300 rounded-lg p-2 font-semibold">
+        </div>
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">ডিমান্ড চার্জ (টাকা)</label>
+          <input type="number" id="demandCharge" value="84" step="any" oninput="calculateBill()" class="w-full bg-white border border-slate-300 rounded-lg p-2 font-semibold">
+        </div>
+      </div>
+    </div>
+
+    <!-- Section 2: Sub-Meter Unit Input Table -->
+    <div class="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-slate-200 no-print">
+      <div class="border-b border-slate-200 pb-3 mb-4 flex flex-wrap justify-between items-center gap-2">
+        <div>
+          <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+            <span class="text-indigo-600">⚡</span> ২. চার রুমের সাব-মিটার রিডিং ইনপুট
+          </h2>
+          <p class="text-xs text-slate-500">তারিখ অনুযায়ী রিডিং বসালে ইউনিট ও শতকরা হার (%) হিসাব হবে</p>
+        </div>
+        <button type="button" onclick="clearAllReadings()" class="text-xs text-rose-600 hover:text-rose-800 font-bold hover:underline">
+          সব রিডিং খালি করুন
+        </button>
+      </div>
+
+      <div class="overflow-x-auto rounded-xl border border-slate-200">
+        <table class="w-full text-xs sm:text-sm text-left border-collapse">
+          <thead>
+            <tr class="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+              <th class="p-3">রুম / সদস্য</th>
+              <th class="p-3 text-center" id="thPrevDate">পূর্ববর্তী রিডিং</th>
+              <th class="p-3 text-center" id="thCurrDate">বর্তমান রিডিং</th>
+              <th class="p-3 text-right">ব্যবহৃত ইউনিট</th>
+              <th class="p-3 text-right">খরচের অনুপাত (%)</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 bg-white">
+            <!-- Sajen -->
+            <tr class="hover:bg-slate-50 transition">
+              <td class="p-3 font-bold text-slate-800">১. সাজেন</td>
+              <td class="p-2.5">
+                <input type="number" id="sajen_prev" placeholder="0.00" step="any" oninput="calculateBill()" class="w-full text-center border border-slate-300 rounded-lg p-2 font-medium focus:ring-2 focus:ring-blue-500">
+              </td>
+              <td class="p-2.5">
+                <input type="number" id="sajen_curr" placeholder="0.00" step="any" oninput="calculateBill()" class="w-full text-center border border-slate-300 rounded-lg p-2 font-medium focus:ring-2 focus:ring-blue-500">
+              </td>
+              <td class="p-3 text-right font-bold text-blue-700 text-sm sm:text-base" id="sajen_unit">0.00</td>
+              <td class="p-3 text-right font-bold text-emerald-600" id="sajen_percent">0.00%</td>
+            </tr>
+            <!-- Jahangir -->
+            <tr class="hover:bg-slate-50 transition">
+              <td class="p-3 font-bold text-slate-800">২. জাহাঙ্গীর</td>
+              <td class="p-2.5">
+                <input type="number" id="jahangir_prev" placeholder="0.00" step="any" oninput="calculateBill()" class="w-full text-center border border-slate-300 rounded-lg p-2 font-medium focus:ring-2 focus:ring-blue-500">
+              </td>
+              <td class="p-2.5">
+                <input type="number" id="jahangir_curr" placeholder="0.00" step="any" oninput="calculateBill()" class="w-full text-center border border-slate-300 rounded-lg p-2 font-medium focus:ring-2 focus:ring-blue-500">
+              </td>
+              <td class="p-3 text-right font-bold text-blue-700 text-sm sm:text-base" id="jahangir_unit">0.00</td>
+              <td class="p-3 text-right font-bold text-emerald-600" id="jahangir_percent">0.00%</td>
+            </tr>
+            <!-- Khairul -->
+            <tr class="hover:bg-slate-50 transition">
+              <td class="p-3 font-bold text-slate-800">৩. খাইরুল</td>
+              <td class="p-2.5">
+                <input type="number" id="khairul_prev" placeholder="0.00" step="any" oninput="calculateBill()" class="w-full text-center border border-slate-300 rounded-lg p-2 font-medium focus:ring-2 focus:ring-blue-500">
+              </td>
+              <td class="p-2.5">
+                <input type="number" id="khairul_curr" placeholder="0.00" step="any" oninput="calculateBill()" class="w-full text-center border border-slate-300 rounded-lg p-2 font-medium focus:ring-2 focus:ring-blue-500">
+              </td>
+              <td class="p-3 text-right font-bold text-blue-700 text-sm sm:text-base" id="khairul_unit">0.00</td>
+              <td class="p-3 text-right font-bold text-emerald-600" id="khairul_percent">0.00%</td>
+            </tr>
+            <!-- Ratul -->
+            <tr class="hover:bg-slate-50 transition">
+              <td class="p-3 font-bold text-slate-800">৪. রাতুল</td>
+              <td class="p-2.5">
+                <input type="number" id="ratul_prev" placeholder="0.00" step="any" oninput="calculateBill()" class="w-full text-center border border-slate-300 rounded-lg p-2 font-medium focus:ring-2 focus:ring-blue-500">
+              </td>
+              <td class="p-2.5">
+                <input type="number" id="ratul_curr" placeholder="0.00" step="any" oninput="calculateBill()" class="w-full text-center border border-slate-300 rounded-lg p-2 font-medium focus:ring-2 focus:ring-blue-500">
+              </td>
+              <td class="p-3 text-right font-bold text-blue-700 text-sm sm:text-base" id="ratul_unit">0.00</td>
+              <td class="p-3 text-right font-bold text-emerald-600" id="ratul_percent">0.00%</td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr class="bg-indigo-50/70 font-bold text-indigo-950 text-xs sm:text-sm">
+              <td colspan="3" class="p-3 text-slate-700">মোট ব্যবহৃত ইউনিট</td>
+              <td class="p-3 text-right text-indigo-700 text-base sm:text-lg font-black" id="total_units_display">0.00</td>
+              <td class="p-3 text-right text-indigo-700 font-black" id="total_percent_display">0.00%</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+
+    <!-- Section Header for Downloadable Full Sheet -->
+    <div class="flex flex-wrap justify-between items-center gap-2 pt-2 no-print">
+      <h2 class="text-xl sm:text-2xl font-black text-slate-800">📋 বিদ্যুৎ বিল সমন্বয় বিবরণী (A4 শিট)</h2>
+      <button onclick="downloadContainer('full-summary-sheet', 'Full_Electricity_Statement.png')" class="bg-slate-800 hover:bg-slate-900 text-white font-medium px-4 py-2 rounded-xl text-xs sm:text-sm shadow transition flex items-center gap-1.5">
+        <span>🖼️</span> পুরো শিট ছবি ডাউনলোড
+      </button>
+    </div>
+
+    <!-- MAIN SUMMARY REPORT -->
+    <div id="full-summary-sheet" class="bg-white p-7 sm:p-9 rounded-2xl shadow-sm max-w-4xl mx-auto text-slate-800 border border-slate-200">
+      
+      <!-- Top Title Area: Badges & Headings -->
+      <div class="border-b-2 border-indigo-600 pb-5 mb-5 flex flex-wrap justify-between items-end gap-3">
+        <div>
+          <div id="monthlyBadge" class="badge-pill bg-indigo-900 text-white text-[11px] font-bold px-3 py-1 rounded-md shadow-sm mb-2 inline-block">
+            <span>মাসিক বিবরণী</span>
+          </div>
+          <h2 class="text-2xl sm:text-3xl font-black text-indigo-950 tracking-tight">বিদ্যুৎ বিল সমন্বয় বিবরণী</h2>
+        </div>
+        
+        <div class="text-right">
+          <div id="sheetBillingRange" class="badge-pill bg-indigo-50 text-indigo-800 text-xs font-bold border border-indigo-200 px-3 py-1 rounded-lg">
+            <span>সাইকেল: --</span>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-1.5">প্রস্তুতের তারিখ: <span id="genDate">--</span></p>
+        </div>
+      </div>
+
+      <!-- Breakdown Cards -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 text-xs">
+        
+        <!-- Left: Recharge History Card -->
+        <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between">
+          <div>
+            <h4 class="font-bold text-slate-800 mb-2 flex items-center gap-1 text-xs sm:text-sm border-b border-slate-200 pb-2">
+              <span class="text-indigo-600">💳</span> রিচার্জ বিবরণী
+            </h4>
+            <ul id="summaryRechargeList" class="divide-y divide-slate-200/80 text-slate-600">
+              <li class="italic text-slate-400 py-2">কোনো রিচার্জ এন্ট্রি যোগ করা হয়নি</li>
+            </ul>
+          </div>
+          
+          <div class="border-t border-slate-200 mt-3 pt-2.5 space-y-1">
+            <div class="flex justify-between font-bold text-slate-800 text-xs">
+              <span>সর্বমোট রিচার্জ:</span>
+              <span id="summaryTotalReload" class="text-indigo-900 font-black">৳ 0.00</span>
+            </div>
+            <div class="flex justify-between text-slate-500 text-[11px]">
+              <span>মোট এজেন্ট ফি:</span>
+              <span id="summaryTotalAgent">৳ 0.00</span>
+            </div>
+            <div class="flex justify-between text-slate-500 text-[11px]">
+              <span>মোট ৫% ভ্যাট:</span>
+              <span id="summaryTotalVat">৳ 0.00</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Rules & Settlement Card -->
+        <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+          <h4 class="font-bold text-slate-800 mb-2 flex items-center gap-1 text-xs sm:text-sm border-b border-slate-200 pb-2">
+            <span class="text-indigo-600">⚙️</span> চার্জ বণ্টন
+          </h4>
+          
+          <div id="boxTotalRecharged" class="flex justify-between items-center text-slate-700 bg-white p-2.5 rounded-lg border border-slate-200 shadow-sm font-bold">
+            <span class="text-xs">মোট ভরানো হয়েছে:</span>
+            <span class="text-indigo-900 text-sm font-black" id="summaryTotalRechargedTop">৳ 0.00</span>
+          </div>
+
+          <div class="flex justify-between text-slate-600 pt-1">
+            <span>কমন চার্জ (অর্ধেক এজেন্ট ফি + মিটার + ডিমান্ড + অর্ধেক ভ্যাট):</span>
+            <span class="font-semibold text-slate-800" id="summaryFixedCost">৳ 0.00</span>
+          </div>
+          <div class="flex justify-between text-slate-600">
+            <span>প্রতি জনের সমান চার্জের ভাগ (÷ ৪):</span>
+            <span class="font-bold text-blue-700" id="summaryFixedPerPerson">৳ 0.00</span>
+          </div>
+          <div class="flex justify-between text-slate-600">
+            <span>সাজেনের একক চার্জ (অর্ধেক এজেন্ট + অর্ধেক ভ্যাট):</span>
+            <span class="font-semibold text-amber-700" id="summarySajenExtra">৳ 0.00</span>
+          </div>
+          
+          <div class="border-t border-slate-200 pt-2 flex justify-between font-black text-indigo-900 text-xs">
+            <span>অবশিষ্ট প্রকৃত এনার্জি খরচ (Remaining):</span>
+            <span id="summaryRemainingEnergy" class="text-emerald-700 font-black">৳ 0.00</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Breakdown Table -->
+      <div class="overflow-x-auto rounded-xl border border-slate-200 mb-6 shadow-sm">
+        <table class="w-full text-xs text-left border-collapse border border-slate-200">
+          <thead>
+            <tr class="bg-slate-800 text-white font-bold">
+              <th class="p-2.5 border border-slate-700">রুম / ব্যক্তি</th>
+              <th class="p-2.5 border border-slate-700 text-center">ব্যবহৃত ইউনিট</th>
+              <th class="p-2.5 border border-slate-700 text-center">শতাংশ (%)</th>
+              <th class="p-2.5 border border-slate-700 text-right">এনার্জি বিল (৳)</th>
+              <th class="p-2.5 border border-slate-700 text-right">চার্জের ভাগ (৳)</th>
+              <th class="p-2.5 border border-slate-700 text-center">বাল্ব সমন্বয়</th>
+              <th class="p-2 border border-slate-700 text-right">সাজেন অতিরিক্ত</th>
+              <th class="p-2.5 border border-slate-700 text-right font-black bg-slate-900">প্রদেয় বিল (৳)</th>
+              <th class="p-2.5 border border-slate-700 text-right font-bold">প্রদত্ত টাকা</th>
+              <th class="p-2.5 border border-slate-700 text-center font-black">দেনা / পাওনা</th>
+            </tr>
+          </thead>
+          <tbody id="summaryTableBody" class="divide-y divide-slate-200"></tbody>
+          <tfoot class="border-t border-slate-200">
+            <tr class="bg-indigo-50 font-black text-indigo-950 text-xs">
+              <td class="p-2.5 border border-slate-200 font-bold">মোট সমন্বয়</td>
+              <td class="p-2.5 border border-slate-200 text-center" id="sumUnits">0.00</td>
+              <td class="p-2.5 border border-slate-200 text-center" id="sumPercent">0%</td>
+              <td class="p-2.5 border border-slate-200 text-right" id="sumEnergyCost">৳ 0.00</td>
+              <td class="p-2.5 border border-slate-200 text-right" id="sumFixed">৳ 0.00</td>
+              <td class="p-2.5 border border-slate-200 text-center">৳ 0.00</td>
+              <td class="p-2.5 border border-slate-200 text-right" id="sumSajenExtra">৳ 0.00</td>
+              <td class="p-2.5 border border-slate-200 text-right font-black text-indigo-900" id="sumFinalTotal">৳ 0.00</td>
+              <td class="p-2.5 border border-slate-200 text-right font-black text-blue-900 whitespace-nowrap" id="sumPaidTotal">৳ 0.00</td>
+              <td class="p-2.5 border border-slate-200 text-center font-black text-slate-900" id="sumNetBalance">৳ 0.00</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+    </div>
+
+    <!-- Individual Room Slips -->
+    <div class="pt-6 no-print">
+      <div class="mb-4">
+        <h3 class="text-xl sm:text-2xl font-black text-slate-800">🎫 প্রত্যেকের ব্যক্তিগত বিল স্লিপ</h3>
+        <p class="text-xs text-slate-500">নিচের বাটনে ক্লিক করে প্রতিটি স্লিপের ছবি ডাউনলোড করতে পারেন।</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="slipsWrapper">
+        <!-- Sajen Slip -->
+        <div class="bg-white rounded-2xl shadow-sm overflow-hidden flex flex-col justify-between border border-slate-200">
+          <div id="voucher-sajen" class="p-6 bg-white">
+            <div class="bg-indigo-600 -m-6 mb-5 p-5 text-white flex justify-between items-center rounded-t-2xl">
+              <div>
+                <span class="badge-pill bg-white/20 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded"><span>বিদ্যুৎ বিল স্লিপ</span></span>
+                <h4 class="text-2xl font-black mt-1">সাজেন</h4>
+              </div>
+              <span class="badge-pill bg-white/20 text-xs text-white font-bold whitespace-nowrap px-3 py-1.5 rounded-full" id="badge-sajen"><span>সাইকেল: --</span></span>
+            </div>
+            <div class="bg-slate-50 p-3.5 rounded-xl mb-4 space-y-1.5 text-xs text-slate-700 border border-slate-100">
+              <div class="flex justify-between">
+                <span id="lblPrev-sajen" class="font-medium text-slate-500">পূর্ববর্তী রিডিং:</span>
+                <b id="valPrev-sajen" class="font-bold text-slate-800">0.00</b>
+              </div>
+              <div class="flex justify-between">
+                <span id="lblCurr-sajen" class="font-medium text-slate-500">বর্তমান রিডিং:</span>
+                <b id="valCurr-sajen" class="font-bold text-slate-800">0.00</b>
+              </div>
+              <div class="flex justify-between items-center text-blue-700 font-bold pt-1 border-t border-slate-200">
+                <span>মোট ব্যবহৃত ইউনিট:</span>
+                <span class="inline-flex items-center gap-1 font-bold">
+                  <span id="valUnit-sajen">0.00</span>
+                  <span class="text-slate-500 font-medium">(</span><span id="valPct-sajen">0.00%</span><span class="text-slate-500 font-medium">)</span>
+                </span>
+              </div>
+            </div>
+            <div class="space-y-1.5 text-xs text-slate-600">
+              <div class="flex justify-between">
+                <span>এনার্জি খরচ:</span>
+                <span class="font-semibold text-slate-800" id="valEnergy-sajen">৳ 0.00</span>
+              </div>
+              <div class="flex justify-between">
+                <span>চার্জের ভাগ (অর্ধেক এজেন্ট ফি + অর্ধেক ভ্যাট + মিটার চার্জ + ডিমান্ড চার্জ):</span>
+                <span class="font-semibold text-slate-800" id="valFixed-sajen">৳ 0.00</span>
+              </div>
+              <div class="flex justify-between">
+                <span>কমন বাল্বের চার্জ:</span>
+                <span class="font-semibold text-emerald-600">+ ৳ 25.00</span>
+              </div>
+              <div class="flex justify-between text-amber-800">
+                <span>অর্ধেক এজেন্ট চার্জ (সাজেন একক):</span>
+                <span class="font-semibold" id="valAgent-sajen">+ ৳ 0.00</span>
+              </div>
+              <div class="flex justify-between text-amber-800">
+                <span>অর্ধেক ভ্যাট (সাজেন একক):</span>
+                <span class="font-semibold" id="valVat-sajen">+ ৳ 0.00</span>
+              </div>
+            </div>
+            <div class="bg-indigo-50/70 p-3.5 rounded-xl mt-4 space-y-1.5 border border-indigo-100">
+              <div class="flex justify-between items-center text-xs">
+                <span class="font-bold text-slate-700">সর্বমোট প্রদেয় বিল:</span>
+                <span class="font-black text-indigo-700 text-base" id="valTotal-sajen">৳ 0.00</span>
+              </div>
+              <div class="flex justify-between items-center text-xs text-slate-600 pt-1 border-t border-indigo-100">
+                <span>রিচার্জে প্রদত্ত টাকা:</span>
+                <span class="font-bold text-blue-700" id="valPaid-sajen">৳ 0.00</span>
+              </div>
+              <div class="flex justify-between items-center text-sm font-black pt-1.5" id="boxNet-sajen">
+                <span>চূড়ান্ত সমন্বয়:</span>
+                <span id="valNet-sajen">৳ 0.00</span>
+              </div>
+            </div>
+          </div>
+          <div class="p-4 bg-slate-50 border-t border-slate-100">
+            <button onclick="downloadContainer('voucher-sajen', 'Bill_Sajen.png')" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm">
+              <span>📥</span> সাজেনের স্লিপ ছবি ডাউনলোড
+            </button>
+          </div>
+        </div>
+
+        <!-- Jahangir Slip -->
+        <div class="bg-white rounded-2xl shadow-sm overflow-hidden flex flex-col justify-between border border-slate-200">
+          <div id="voucher-jahangir" class="p-6 bg-white">
+            <div class="bg-teal-600 -m-6 mb-5 p-5 text-white flex justify-between items-center rounded-t-2xl">
+              <div>
+                <span class="badge-pill bg-white/20 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded"><span>বিদ্যুৎ বিল স্লিপ</span></span>
+                <h4 class="text-2xl font-black mt-1">জাহাঙ্গীর</h4>
+              </div>
+              <span class="badge-pill bg-white/20 text-xs text-white font-bold whitespace-nowrap px-3 py-1.5 rounded-full" id="badge-jahangir"><span>সাইকেল: --</span></span>
+            </div>
+            <div class="bg-slate-50 p-3.5 rounded-xl mb-4 space-y-1.5 text-xs text-slate-700 border border-slate-100">
+              <div class="flex justify-between">
+                <span id="lblPrev-jahangir" class="font-medium text-slate-500">পূর্ববর্তী রিডিং:</span>
+                <b id="valPrev-jahangir" class="font-bold text-slate-800">0.00</b>
+              </div>
+              <div class="flex justify-between">
+                <span id="lblCurr-jahangir" class="font-medium text-slate-500">বর্তমান রিডিং:</span>
+                <b id="valCurr-jahangir" class="font-bold text-slate-800">0.00</b>
+              </div>
+              <div class="flex justify-between items-center text-teal-700 font-bold pt-1 border-t border-slate-200">
+                <span>মোট ব্যবহৃত ইউনিট:</span>
+                <span class="inline-flex items-center gap-1 font-bold">
+                  <span id="valUnit-jahangir">0.00</span>
+                  <span class="text-slate-500 font-medium">(</span><span id="valPct-jahangir">0.00%</span><span class="text-slate-500 font-medium">)</span>
+                </span>
+              </div>
+            </div>
+            <div class="space-y-1.5 text-xs text-slate-600">
+              <div class="flex justify-between">
+                <span>এনার্জি খরচ:</span>
+                <span class="font-semibold text-slate-800" id="valEnergy-jahangir">৳ 0.00</span>
+              </div>
+              <div class="flex justify-between">
+                <span>চার্জের ভাগ (অর্ধেক এজেন্ট ফি + অর্ধেক ভ্যাট + মিটার চার্জ + ডিমান্ড চার্জ):</span>
+                <span class="font-semibold text-slate-800" id="valFixed-jahangir">৳ 0.00</span>
+              </div>
+              <div class="flex justify-between">
+                <span>কমন বাল্বের চার্জ:</span>
+                <span class="font-semibold text-emerald-600">+ ৳ 25.00</span>
+              </div>
+            </div>
+            <div class="bg-teal-50/70 p-3.5 rounded-xl mt-4 space-y-1.5 border border-teal-100">
+              <div class="flex justify-between items-center text-xs">
+                <span class="font-bold text-slate-700">সর্বমোট প্রদেয় বিল:</span>
+                <span class="font-black text-teal-700 text-base" id="valTotal-jahangir">৳ 0.00</span>
+              </div>
+              <div class="flex justify-between items-center text-xs text-slate-600 pt-1 border-t border-teal-100">
+                <span>রিচার্জে প্রদত্ত টাকা:</span>
+                <span class="font-bold text-blue-700" id="valPaid-jahangir">৳ 0.00</span>
+              </div>
+              <div class="flex justify-between items-center text-sm font-black pt-1.5" id="boxNet-jahangir">
+                <span>চূড়ান্ত সমন্বয়:</span>
+                <span id="valNet-jahangir">৳ 0.00</span>
+              </div>
+            </div>
+          </div>
+          <div class="p-4 bg-slate-50 border-t border-slate-100">
+            <button onclick="downloadContainer('voucher-jahangir', 'Bill_Jahangir.png')" class="w-full bg-teal-600 hover:bg-teal-700 text-white py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm">
+              <span>📥</span> জাহাঙ্গীরের স্লিপ ছবি ডাউনলোড
+            </button>
+          </div>
+        </div>
+
+        <!-- Khairul Slip -->
+        <div class="bg-white rounded-2xl shadow-sm overflow-hidden flex flex-col justify-between border border-slate-200">
+          <div id="voucher-khairul" class="p-6 bg-white">
+            <div class="bg-sky-600 -m-6 mb-5 p-5 text-white flex justify-between items-center rounded-t-2xl">
+              <div>
+                <span class="badge-pill bg-white/20 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded"><span>বিদ্যুৎ বিল স্লিপ</span></span>
+                <h4 class="text-2xl font-black mt-1">খাইরুল</h4>
+              </div>
+              <span class="badge-pill bg-white/20 text-xs text-white font-bold whitespace-nowrap px-3 py-1.5 rounded-full" id="badge-khairul"><span>সাইকেল: --</span></span>
+            </div>
+            <div class="bg-slate-50 p-3.5 rounded-xl mb-4 space-y-1.5 text-xs text-slate-700 border border-slate-100">
+              <div class="flex justify-between">
+                <span id="lblPrev-khairul" class="font-medium text-slate-500">পূর্ববর্তী রিডিং:</span>
+                <b id="valPrev-khairul" class="font-bold text-slate-800">0.00</b>
+              </div>
+              <div class="flex justify-between">
+                <span id="lblCurr-khairul" class="font-medium text-slate-500">বর্তমান রিডিং:</span>
+                <b id="valCurr-khairul" class="font-bold text-slate-800">0.00</b>
+              </div>
+              <div class="flex justify-between items-center text-sky-700 font-bold pt-1 border-t border-slate-200">
+                <span>মোট ব্যবহৃত ইউনিট:</span>
+                <span class="inline-flex items-center gap-1 font-bold">
+                  <span id="valUnit-khairul">0.00</span>
+                  <span class="text-slate-500 font-medium">(</span><span id="valPct-khairul">0.00%</span><span class="text-slate-500 font-medium">)</span>
+                </span>
+              </div>
+            </div>
+            <div class="space-y-1.5 text-xs text-slate-600">
+              <div class="flex justify-between">
+                <span>এনার্জি খরচ:</span>
+                <span class="font-semibold text-slate-800" id="valEnergy-khairul">৳ 0.00</span>
+              </div>
+              <div class="flex justify-between">
+                <span>চার্জের ভাগ (অর্ধেক এজেন্ট ফি + অর্ধেক ভ্যাট + মিটার চার্জ + ডিমান্ড চার্জ):</span>
+                <span class="font-semibold text-slate-800" id="valFixed-khairul">৳ 0.00</span>
+              </div>
+              <div class="flex justify-between">
+                <span>কমন বাল্বের চার্জ:</span>
+                <span class="font-semibold text-emerald-600">+ ৳ 25.00</span>
+              </div>
+            </div>
+            <div class="bg-sky-50/70 p-3.5 rounded-xl mt-4 space-y-1.5 border border-sky-100">
+              <div class="flex justify-between items-center text-xs">
+                <span class="font-bold text-slate-700">সর্বমোট প্রদেয় বিল:</span>
+                <span class="font-black text-sky-700 text-base" id="valTotal-khairul">৳ 0.00</span>
+              </div>
+              <div class="flex justify-between items-center text-xs text-slate-600 pt-1 border-t border-sky-100">
+                <span>রিচার্জে প্রদত্ত টাকা:</span>
+                <span class="font-bold text-blue-700" id="valPaid-khairul">৳ 0.00</span>
+              </div>
+              <div class="flex justify-between items-center text-sm font-black pt-1.5" id="boxNet-khairul">
+                <span>চূড়ান্ত সমন্বয়:</span>
+                <span id="valNet-khairul">৳ 0.00</span>
+              </div>
+            </div>
+          </div>
+          <div class="p-4 bg-slate-50 border-t border-slate-100">
+            <button onclick="downloadContainer('voucher-khairul', 'Bill_Khairul.png')" class="w-full bg-sky-600 hover:bg-sky-700 text-white py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm">
+              <span>📥</span> খাইরুলের স্লিপ ছবি ডাউনলোড
+            </button>
+          </div>
+        </div>
+
+        <!-- Ratul Slip -->
+        <div class="bg-white rounded-2xl shadow-sm overflow-hidden flex flex-col justify-between border border-slate-200">
+          <div id="voucher-ratul" class="p-6 bg-white">
+            <div class="bg-purple-600 -m-6 mb-5 p-5 text-white flex justify-between items-center rounded-t-2xl">
+              <div>
+                <span class="badge-pill bg-white/20 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded"><span>বিদ্যুৎ বিল স্লিপ</span></span>
+                <h4 class="text-2xl font-black mt-1">রাতুল</h4>
+              </div>
+              <span class="badge-pill bg-white/20 text-xs text-white font-bold whitespace-nowrap px-3 py-1.5 rounded-full" id="badge-ratul"><span>সাইকেল: --</span></span>
+            </div>
+            <div class="bg-slate-50 p-3.5 rounded-xl mb-4 space-y-1.5 text-xs text-slate-700 border border-slate-100">
+              <div class="flex justify-between">
+                <span id="lblPrev-ratul" class="font-medium text-slate-500">পূর্ববর্তী রিডিং:</span>
+                <b id="valPrev-ratul" class="font-bold text-slate-800">0.00</b>
+              </div>
+              <div class="flex justify-between">
+                <span id="lblCurr-ratul" class="font-medium text-slate-500">বর্তমান রিডিং:</span>
+                <b id="valCurr-ratul" class="font-bold text-slate-800">0.00</b>
+              </div>
+              <div class="flex justify-between items-center text-purple-700 font-bold pt-1 border-t border-slate-200">
+                <span>মোট ব্যবহৃত ইউনিট:</span>
+                <span class="inline-flex items-center gap-1 font-bold">
+                  <span id="valUnit-ratul">0.00</span>
+                  <span class="text-slate-500 font-medium">(</span><span id="valPct-ratul">0.00%</span><span class="text-slate-500 font-medium">)</span>
+                </span>
+              </div>
+            </div>
+            <div class="space-y-1.5 text-xs text-slate-600">
+              <div class="flex justify-between">
+                <span>এনার্জি খরচ:</span>
+                <span class="font-semibold text-slate-800" id="valEnergy-ratul">৳ 0.00</span>
+              </div>
+              <div class="flex justify-between">
+                <span>চার্জের ভাগ (অর্ধেক এজেন্ট ফি + অর্ধেক ভ্যাট + মিটার চার্জ + ডিমান্ড চার্জ):</span>
+                <span class="font-semibold text-slate-800" id="valFixed-ratul">৳ 0.00</span>
+              </div>
+              <div class="flex justify-between text-rose-600">
+                <span>কমন বাল্ব সমন্বয় (ছাড়):</span>
+                <span class="font-black">- ৳ 75.00</span>
+              </div>
+            </div>
+            <div class="bg-purple-50/70 p-3.5 rounded-xl mt-4 space-y-1.5 border border-purple-100">
+              <div class="flex justify-between items-center text-xs">
+                <span class="font-bold text-slate-700">সর্বমোট প্রদেয় বিল:</span>
+                <span class="font-black text-purple-700 text-base" id="valTotal-ratul">৳ 0.00</span>
+              </div>
+              <div class="flex justify-between items-center text-xs text-slate-600 pt-1 border-t border-purple-100">
+                <span>রিচার্জে প্রদত্ত টাকা:</span>
+                <span class="font-bold text-blue-700" id="valPaid-ratul">৳ 0.00</span>
+              </div>
+              <div class="flex justify-between items-center text-sm font-black pt-1.5" id="boxNet-ratul">
+                <span>চূড়ান্ত সমন্বয়:</span>
+                <span id="valNet-ratul">৳ 0.00</span>
+              </div>
+            </div>
+          </div>
+          <div class="p-4 bg-slate-50 border-t border-slate-100">
+            <button onclick="downloadContainer('voucher-ratul', 'Bill_Ratul.png')" class="w-full bg-purple-600 hover:bg-purple-700 text-white py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm">
+              <span>📥</span> রাতুলের স্লিপ ছবি ডাউনলোড
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    const bengaliMonths = ['জানু', 'ফেব্রু', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টে', 'অক্টো', 'নভে', 'ডিসে'];
+    const bengaliMonthsFull = ['জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'];
+
+    const memberIds = ['sajen', 'jahangir', 'khairul', 'ratul'];
+    const memberShortNames = { sajen: 'সাজেন', jahangir: 'জাহাঙ্গীর', khairul: 'খাইরুল', ratul: 'রাতুল' };
+    const memberDisplayNames = { sajen: '১. সাজেন', jahangir: '২. জাহাঙ্গীর', khairul: '৩. খাইরুল', ratul: '৪. রাতুল' };
+
+    // ৩টি সম্পূর্ণ ব্ল্যাঙ্ক এন্ট্রি দিয়ে শুরু
+    let rechargeList = [
+      { id: 1, date: '', amount: '', customVat: null, contributors: { sajen: '', jahangir: '', khairul: '', ratul: '' } },
+      { id: 2, date: '', amount: '', customVat: null, contributors: { sajen: '', jahangir: '', khairul: '', ratul: '' } },
+      { id: 3, date: '', amount: '', customVat: null, contributors: { sajen: '', jahangir: '', khairul: '', ratul: '' } }
+    ];
+
+    function showToast(text, icon = '✅') {
+      const toast = document.getElementById('toastMessage');
+      document.getElementById('toastText').innerText = text;
+      document.getElementById('toastIcon').innerText = icon;
+      toast.classList.remove('hidden');
+      setTimeout(() => { toast.classList.add('hidden'); }, 3000);
+    }
+
+    // স্মার্ট ডেটপিকার ফোকাস হ্যান্ডলার
+    function handleDateFocus(inputId, monthOffset = 0) {
+      const el = document.getElementById(inputId);
+      if (!el || el.value) return;
+
+      const d = new Date();
+      d.setMonth(d.getMonth() + monthOffset);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      
+      el.value = `${yyyy}-${mm}-${dd}`;
+      calculateBill();
+      saveToLocalStorage();
+
+      if (typeof el.showPicker === 'function') {
+        try { el.showPicker(); } catch (e) {}
+      }
+    }
+
+    function handleRechargeDateFocus(id) {
+      const el = document.getElementById(`recharge-date-${id}`);
+      const target = rechargeList.find(x => x.id === id);
+      if (!el || (target && target.date)) return;
+
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const todayStr = `${yyyy}-${mm}-${dd}`;
+
+      el.value = todayStr;
+      if (target) target.date = todayStr;
+      calculateBill();
+      saveToLocalStorage();
+
+      if (typeof el.showPicker === 'function') {
+        try { el.showPicker(); } catch (e) {}
+      }
+    }
+
+    function calculateAgentFee(amount) {
+      if (!amount || amount <= 0) return 0;
+      return Math.ceil(amount / 1000) * 10;
+    }
+
+    function calculateAutoVat(amount) {
+      if (!amount || amount <= 0) return 0;
+      const agentFee = calculateAgentFee(amount);
+      const net = Math.max(0, amount - agentFee);
+      return (net * 5) / 105;
+    }
+
+    function addRechargeRow() {
+      const newEntry = {
+        id: Date.now(),
+        date: '',
+        amount: '',
+        customVat: null,
+        contributors: { sajen: '', jahangir: '', khairul: '', ratul: '' }
+      };
+      rechargeList.push(newEntry);
+      appendRechargeCardDOM(newEntry);
+      calculateBill();
+      saveToLocalStorage();
+    }
+
+    function assignAllTo(id, memberKey) {
+      const target = rechargeList.find(x => x.id === id);
+      if (!target) return;
+      const amt = parseFloat(target.amount) || 0;
+      memberIds.forEach(m => {
+        target.contributors[m] = (m === memberKey) ? (amt > 0 ? amt : '') : '';
+        const el = document.getElementById(`contrib-${id}-${m}`);
+        if (el) el.value = target.contributors[m];
+      });
+      updateContribStatusText(id);
+      calculateBill();
+      saveToLocalStorage();
+    }
+
+    function splitEqually(id) {
+      const target = rechargeList.find(x => x.id === id);
+      if (!target) return;
+      const amt = parseFloat(target.amount) || 0;
+      const share = amt > 0 ? (amt / 4).toFixed(2) : '';
+      memberIds.forEach(m => {
+        target.contributors[m] = share;
+        const el = document.getElementById(`contrib-${id}-${m}`);
+        if (el) el.value = share;
+      });
+      updateContribStatusText(id);
+      calculateBill();
+      saveToLocalStorage();
+    }
+
+    function appendRechargeCardDOM(r) {
+      const container = document.getElementById('rechargeCardsContainer');
+      const rowIndex = container.children.length + 1;
+      const numAmt = parseFloat(r.amount) || 0;
+      const fee = calculateAgentFee(numAmt);
+      const vat = (r.customVat !== null && r.customVat !== undefined && !isNaN(r.customVat)) ? Number(r.customVat) : calculateAutoVat(numAmt);
+
+      const card = document.createElement('div');
+      card.id = `recharge-card-${r.id}`;
+      card.className = 'bg-slate-50 hover:bg-slate-100/70 p-3.5 rounded-xl border border-slate-200 transition text-xs space-y-3';
+      card.innerHTML = `
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
+          <div class="flex items-center gap-2">
+            <span class="bg-indigo-700 text-white font-bold w-5 h-5 rounded-full flex items-center justify-center text-[10px]" id="badge-num-${r.id}">${rowIndex}</span>
+            <span class="font-bold text-slate-800">রিচার্জ ট্রানজ্যাকশন</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-[11px] text-slate-500">দ্রুত দাতা নির্বাচন:</span>
+            <button type="button" onclick="assignAllTo(${r.id}, 'sajen')" class="bg-white border border-slate-300 hover:border-blue-500 text-slate-700 px-2 py-0.5 rounded text-[11px] font-semibold">সাজেন</button>
+            <button type="button" onclick="assignAllTo(${r.id}, 'jahangir')" class="bg-white border border-slate-300 hover:border-teal-500 text-slate-700 px-2 py-0.5 rounded text-[11px] font-semibold">জাহাঙ্গীর</button>
+            <button type="button" onclick="assignAllTo(${r.id}, 'khairul')" class="bg-white border border-slate-300 hover:border-sky-500 text-slate-700 px-2 py-0.5 rounded text-[11px] font-semibold">খাইরুল</button>
+            <button type="button" onclick="assignAllTo(${r.id}, 'ratul')" class="bg-white border border-slate-300 hover:border-purple-500 text-slate-700 px-2 py-0.5 rounded text-[11px] font-semibold">রাতুল</button>
+            <button type="button" onclick="splitEqually(${r.id})" class="bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded text-[11px] font-bold">সমান ৪ ভাগ</button>
+            <button type="button" onclick="deleteRechargeRow(${r.id})" class="text-rose-500 hover:text-rose-700 font-black text-sm px-1 ml-1" title="মুছুন">✕</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+          <div>
+            <label class="block text-[11px] font-bold text-slate-600 mb-1">তারিখ</label>
+            <input type="date" id="recharge-date-${r.id}" value="${r.date || ''}" onfocus="handleRechargeDateFocus(${r.id})" onclick="handleRechargeDateFocus(${r.id})" oninput="onRechargeDateInput(${r.id}, this.value)" class="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-semibold focus:ring-1 focus:ring-blue-500 cursor-pointer">
+          </div>
+          <div>
+            <label class="block text-[11px] font-bold text-slate-600 mb-1">টাকার পরিমাণ (৳)</label>
+            <input type="number" value="${r.amount || ''}" placeholder="৳ ২০০০" oninput="onRechargeAmountInput(${r.id}, this.value)" class="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-black text-slate-900 focus:ring-1 focus:ring-blue-500">
+          </div>
+          <div>
+            <label class="block text-[11px] font-bold text-slate-600 mb-1">এজেন্ট ফি (১০৳ / ১০০০৳)</label>
+            <div class="bg-white border border-slate-200 rounded-lg p-2 text-xs font-bold text-slate-700" id="recharge-fee-${r.id}">
+              ৳ ${fee.toFixed(2)}
+            </div>
+          </div>
+          <div>
+            <label class="block text-[11px] font-bold text-slate-600 mb-1">৫% ভ্যাট (প্রিপেইড নিয়ম)</label>
+            <input type="number" step="0.01" value="${numAmt > 0 ? vat.toFixed(2) : ''}" placeholder="ভ্যাট (৳)" id="recharge-vat-input-${r.id}" oninput="onRechargeVatInput(${r.id}, this.value)" class="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-black text-amber-700 focus:ring-1 focus:ring-blue-500">
+          </div>
+        </div>
+
+        <div class="bg-white p-2.5 rounded-lg border border-slate-200">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="font-bold text-slate-700 text-[11px]">টাকা কে কত দিয়েছে (প্রদানকারী ভাগ):</span>
+            <span class="text-[11px] text-slate-500" id="contrib-status-${r.id}">মিলিত যোগফল: ৳ 0.00</span>
+          </div>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div>
+              <label class="block text-[10px] font-bold text-slate-500 mb-0.5">১. সাজেন (৳)</label>
+              <input type="number" step="any" placeholder="0" id="contrib-${r.id}-sajen" value="${r.contributors.sajen || ''}" oninput="onContribInput(${r.id}, 'sajen', this.value)" class="w-full bg-slate-50 border border-slate-300 rounded p-1.5 text-xs font-semibold">
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-500 mb-0.5">২. জাহাঙ্গীর (৳)</label>
+              <input type="number" step="any" placeholder="0" id="contrib-${r.id}-jahangir" value="${r.contributors.jahangir || ''}" oninput="onContribInput(${r.id}, 'jahangir', this.value)" class="w-full bg-slate-50 border border-slate-300 rounded p-1.5 text-xs font-semibold">
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-500 mb-0.5">৩. খাইরুল (৳)</label>
+              <input type="number" step="any" placeholder="0" id="contrib-${r.id}-khairul" value="${r.contributors.khairul || ''}" oninput="onContribInput(${r.id}, 'khairul', this.value)" class="w-full bg-slate-50 border border-slate-300 rounded p-1.5 text-xs font-semibold">
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-500 mb-0.5">৪. রাতুল (৳)</label>
+              <input type="number" step="any" placeholder="0" id="contrib-${r.id}-ratul" value="${r.contributors.ratul || ''}" oninput="onContribInput(${r.id}, 'ratul', this.value)" class="w-full bg-slate-50 border border-slate-300 rounded p-1.5 text-xs font-semibold">
+            </div>
+          </div>
+        </div>
+      `;
+      container.appendChild(card);
+      updateContribStatusText(r.id);
+    }
+
+    function deleteRechargeRow(id) {
+      if (rechargeList.length <= 1) {
+        showToast('কমপক্ষে ১টি রিচার্জ কার্ড রাখা আবশ্যক', '⚠️');
+        return;
+      }
+      rechargeList = rechargeList.filter(item => item.id !== id);
+      const card = document.getElementById(`recharge-card-${id}`);
+      if (card) card.remove();
+      
+      const container = document.getElementById('rechargeCardsContainer');
+      Array.from(container.children).forEach((el, idx) => {
+        const badge = el.querySelector('[id^="badge-num-"]');
+        if (badge) badge.innerText = idx + 1;
+      });
+      calculateBill();
+      saveToLocalStorage();
+    }
+
+    function onRechargeDateInput(id, val) {
+      const target = rechargeList.find(x => x.id === id);
+      if (target) target.date = val;
+      calculateBill();
+      saveToLocalStorage();
+    }
+
+    function onRechargeAmountInput(id, val) {
+      const target = rechargeList.find(x => x.id === id);
+      if (target) {
+        target.amount = val;
+        target.customVat = null;
+      }
+      
+      const numAmt = parseFloat(val) || 0;
+      const fee = calculateAgentFee(numAmt);
+      const vat = calculateAutoVat(numAmt);
+
+      const feeCell = document.getElementById(`recharge-fee-${id}`);
+      if (feeCell) feeCell.innerText = `৳ ${fee.toFixed(2)}`;
+
+      const vatInput = document.getElementById(`recharge-vat-input-${id}`);
+      if (vatInput) vatInput.value = numAmt > 0 ? vat.toFixed(2) : '';
+
+      updateContribStatusText(id);
+      calculateBill();
+      saveToLocalStorage();
+    }
+
+    function onRechargeVatInput(id, val) {
+      const target = rechargeList.find(x => x.id === id);
+      if (target) {
+        target.customVat = val === '' ? null : parseFloat(val);
+      }
+      calculateBill();
+      saveToLocalStorage();
+    }
+
+    function onContribInput(id, memberKey, val) {
+      const target = rechargeList.find(x => x.id === id);
+      if (target) {
+        if (!target.contributors) {
+          target.contributors = { sajen: '', jahangir: '', khairul: '', ratul: '' };
+        }
+        target.contributors[memberKey] = val;
+      }
+      updateContribStatusText(id);
+      calculateBill();
+      saveToLocalStorage();
+    }
+
+    function updateContribStatusText(id) {
+      const target = rechargeList.find(x => x.id === id);
+      if (!target) return;
+      const totalRec = parseFloat(target.amount) || 0;
+      let sumContrib = 0;
+      if (target.contributors) {
+        memberIds.forEach(m => {
+          sumContrib += parseFloat(target.contributors[m]) || 0;
+        });
+      }
+      const el = document.getElementById(`contrib-status-${id}`);
+      if (el) {
+        if (totalRec > 0 && Math.abs(sumContrib - totalRec) > 0.01) {
+          el.innerHTML = `<span class="text-rose-600 font-bold">যোগফল: ৳ ${sumContrib.toFixed(2)} (অসম: ৳ ${(totalRec - sumContrib).toFixed(2)})</span>`;
+        } else {
+          el.innerHTML = `<span class="text-emerald-600 font-bold">যোগফল: ৳ ${sumContrib.toFixed(2)} (সম্পূর্ণ মিলেছে)</span>`;
+        }
+      }
+    }
+
+    function initRechargeCards() {
+      const container = document.getElementById('rechargeCardsContainer');
+      container.innerHTML = '';
+      rechargeList.forEach(r => appendRechargeCardDOM(r));
+    }
+
+    function handleDateChange() {
+      calculateBill();
+      saveToLocalStorage();
+    }
+
+    function clearAllReadings() {
+      memberIds.forEach(m => {
+        const pEl = document.getElementById(`${m}_prev`);
+        const cEl = document.getElementById(`${m}_curr`);
+        if (pEl) pEl.value = '';
+        if (cEl) cEl.value = '';
+      });
+      calculateBill();
+      saveToLocalStorage();
+      showToast('সকল রিডিং খালি করা হয়েছে');
+    }
+
+    function parseDateParts(dateStr) {
+      if (!dateStr) return null;
+      const parts = dateStr.split('-');
+      if (parts.length !== 3) return null;
+      return {
+        year: parts[0],
+        monthIndex: parseInt(parts[1], 10) - 1,
+        day: parseInt(parts[2], 10)
+      };
+    }
+
+    function formatCleanCycleBadge(prevDateStr, currDateStr) {
+      const p = parseDateParts(prevDateStr);
+      const c = parseDateParts(currDateStr);
+      if (!p && !c) return 'সাইকেল: --';
+      if (p && !c) return `সাইকেল: ${p.day} ${bengaliMonths[p.monthIndex]}, ${p.year}`;
+      if (!p && c) return `সাইকেল: ${c.day} ${bengaliMonths[c.monthIndex]}, ${c.year}`;
+
+      if (p.year === c.year) {
+        return `সাইকেল: ${p.day} ${bengaliMonths[p.monthIndex]} - ${c.day} ${bengaliMonths[c.monthIndex]}, ${c.year}`;
+      }
+      return `সাইকেল: ${p.day} ${bengaliMonths[p.monthIndex]}, ${p.year} - ${c.day} ${bengaliMonths[c.monthIndex]}, ${c.year}`;
+    }
+
+    function formatDayMonthFull(dateStr, fallback) {
+      const p = parseDateParts(dateStr);
+      if (!p) return fallback;
+      return `${p.day} ${bengaliMonthsFull[p.monthIndex]}`;
+    }
+
+    function calculateBill() {
+      const prevDateVal = document.getElementById('prevDate').value;
+      const currDateVal = document.getElementById('currDate').value;
+
+      const cleanCycleText = formatCleanCycleBadge(prevDateVal, currDateVal);
+      document.getElementById('sheetBillingRange').innerHTML = `<span>${cleanCycleText}</span>`;
+      document.getElementById('genDate').innerText = new Date().toLocaleDateString('bn-BD', { year: 'numeric', month: 'long', day: 'numeric' });
+
+      const prevLabelShort = formatDayMonthFull(prevDateVal, 'পূর্ববর্তী');
+      const currLabelShort = formatDayMonthFull(currDateVal, 'বর্তমান');
+
+      document.getElementById('thPrevDate').innerText = `${prevLabelShort} রিডিং`;
+      document.getElementById('thCurrDate').innerText = `${currLabelShort} রিডিং`;
+
+      memberIds.forEach(m => {
+        document.getElementById(`badge-${m}`).innerHTML = `<span>${cleanCycleText}</span>`;
+        document.getElementById(`lblPrev-${m}`).innerText = `${prevLabelShort} রিডিং:`;
+        document.getElementById(`lblCurr-${m}`).innerText = `${currLabelShort} রিডিং:`;
+      });
+
+      let totalRecharge = 0;
+      let totalAgentFee = 0;
+      let totalVat = 0;
+      const activeRecharges = [];
+
+      let memberPaidAmounts = { sajen: 0, jahangir: 0, khairul: 0, ratul: 0 };
+
+      rechargeList.forEach(r => {
+        const amt = parseFloat(r.amount);
+        if (!isNaN(amt) && amt > 0) {
+          const fee = calculateAgentFee(amt);
+          const vat = (r.customVat !== null && r.customVat !== undefined && !isNaN(r.customVat)) ? Number(r.customVat) : calculateAutoVat(amt);
+          totalRecharge += amt;
+          totalAgentFee += fee;
+          totalVat += vat;
+
+          if (r.contributors) {
+            memberIds.forEach(m => {
+              const cAmt = parseFloat(r.contributors[m]) || 0;
+              if (cAmt > 0) memberPaidAmounts[m] += cAmt;
+            });
+          }
+
+          activeRecharges.push({ date: r.date, amount: amt, fee: fee, vat: vat });
+        }
+      });
+
+      const halfAgentFee = totalAgentFee / 2;
+      const halfVat = totalVat / 2;
+      const meterCharge = parseFloat(document.getElementById('meterCharge').value) || 0;
+      const demandCharge = parseFloat(document.getElementById('demandCharge').value) || 0;
+
+      const totalCommonFixed = halfAgentFee + meterCharge + demandCharge + halfVat;
+      const fixedPerHead = totalCommonFixed / 4;
+      const sajenExtraTotal = halfAgentFee + halfVat;
+      const remainingEnergyCost = Math.max(0, totalRecharge - totalCommonFixed - sajenExtraTotal);
+
+      let units = {};
+      let totalUnits = 0;
+
+      memberIds.forEach(m => {
+        const prevInput = document.getElementById(`${m}_prev`);
+        const currInput = document.getElementById(`${m}_curr`);
+
+        const p = prevInput ? parseFloat(prevInput.value) : NaN;
+        const c = currInput ? parseFloat(currInput.value) : NaN;
+
+        let u = 0;
+        if (!isNaN(p) && !isNaN(c) && c >= p) {
+          u = c - p;
+        } else if (!isNaN(c) && isNaN(p)) {
+          u = c;
+        }
+        units[m] = u;
+        totalUnits += u;
+        const unitDisplay = document.getElementById(`${m}_unit`);
+        if (unitDisplay) unitDisplay.innerText = u.toFixed(2);
+      });
+
+      const totalUnitsEl = document.getElementById('total_units_display');
+      if (totalUnitsEl) totalUnitsEl.innerText = totalUnits.toFixed(2);
+      const totalPercentEl = document.getElementById('total_percent_display');
+      if (totalPercentEl) totalPercentEl.innerText = totalUnits > 0 ? '100.00%' : '0.00%';
+
+      let summaryRowsHtml = '';
+      let sumEnergy = 0;
+      let sumGrand = 0;
+      let sumPaid = 0;
+      let sumNet = 0;
+
+      memberIds.forEach((m) => {
+        const u = units[m];
+        const pct = totalUnits > 0 ? (u / totalUnits) * 100 : 0;
+        document.getElementById(`${m}_percent`).innerText = pct.toFixed(2) + '%';
+
+        const energyCost = totalUnits > 0 ? (remainingEnergyCost * pct) / 100 : 0;
+        sumEnergy += energyCost;
+
+        const bulb = (m === 'ratul') ? -75 : 25;
+        const extra = (m === 'sajen') ? sajenExtraTotal : 0;
+        const totalPayable = energyCost + fixedPerHead + bulb + extra;
+        sumGrand += totalPayable;
+
+        const paid = memberPaidAmounts[m];
+        sumPaid += paid;
+
+        const diff = totalPayable - paid;
+        sumNet += diff;
+
+        let netBadgeHtml = '';
+        let netTextSlip = '';
+        let netBoxClass = '';
+
+        if (Math.abs(diff) < 0.05) {
+          netBadgeHtml = `<span class="font-bold text-slate-500 whitespace-nowrap">পরিশোধিত</span>`;
+          netTextSlip = `৳ 0.00 (সমান)`;
+          netBoxClass = 'text-slate-700 bg-slate-100';
+        } else if (diff > 0) {
+          netBadgeHtml = `<span class="font-bold text-rose-600 whitespace-nowrap">দিবে ৳ ${diff.toFixed(2)}</span>`;
+          netTextSlip = `দিবে ৳ ${diff.toFixed(2)}`;
+          netBoxClass = 'text-rose-700 bg-rose-50';
+        } else {
+          const refund = Math.abs(diff);
+          netBadgeHtml = `<span class="font-bold text-emerald-600 whitespace-nowrap">পাবে ৳ ${refund.toFixed(2)}</span>`;
+          netTextSlip = `পাবে ৳ ${refund.toFixed(2)}`;
+          netBoxClass = 'text-emerald-700 bg-emerald-50';
+        }
+
+        summaryRowsHtml += `
+          <tr class="hover:bg-slate-50 transition">
+            <td class="p-2.5 font-bold text-slate-800 whitespace-nowrap">${memberDisplayNames[m]}</td>
+            <td class="p-2.5 text-center font-bold text-blue-700 whitespace-nowrap">${u.toFixed(2)}</td>
+            <td class="p-2.5 text-center font-bold text-emerald-600 whitespace-nowrap">${pct.toFixed(2)}%</td>
+            <td class="p-2.5 text-right font-medium text-slate-700 whitespace-nowrap">৳ ${energyCost.toFixed(2)}</td>
+            <td class="p-2.5 text-right text-slate-700 whitespace-nowrap">৳ ${fixedPerHead.toFixed(2)}</td>
+            <td class="p-2.5 text-center font-bold whitespace-nowrap ${bulb < 0 ? 'text-rose-600' : 'text-emerald-700'}">${bulb < 0 ? '- ৳ 75.00' : '+ ৳ 25.00'}</td>
+            <td class="p-2.5 text-right whitespace-nowrap ${extra > 0 ? 'font-bold text-amber-700' : 'text-slate-400'}">${extra > 0 ? '৳ ' + extra.toFixed(2) : '-'}</td>
+            <td class="p-2.5 text-right font-black text-indigo-950 bg-indigo-50/40 whitespace-nowrap">৳ ${totalPayable.toFixed(2)}</td>
+            <td class="p-2.5 text-right font-bold text-blue-900 whitespace-nowrap">৳ ${paid.toFixed(2)}</td>
+            <td class="p-2.5 text-center whitespace-nowrap">${netBadgeHtml}</td>
+          </tr>
+        `;
+
+        const prevInputVal = document.getElementById(`${m}_prev`)?.value;
+        const currInputVal = document.getElementById(`${m}_curr`)?.value;
+
+        const valPrevEl = document.getElementById(`valPrev-${m}`);
+        if (valPrevEl) valPrevEl.innerText = prevInputVal ? parseFloat(prevInputVal).toFixed(2) : '0.00';
+        const valCurrEl = document.getElementById(`valCurr-${m}`);
+        if (valCurrEl) valCurrEl.innerText = currInputVal ? parseFloat(currInputVal).toFixed(2) : '0.00';
+        const valUnitEl = document.getElementById(`valUnit-${m}`);
+        if (valUnitEl) valUnitEl.innerText = u.toFixed(2);
+        const valPctEl = document.getElementById(`valPct-${m}`);
+        if (valPctEl) valPctEl.innerText = pct.toFixed(2) + '%';
+        const valEnergyEl = document.getElementById(`valEnergy-${m}`);
+        if (valEnergyEl) valEnergyEl.innerText = '৳ ' + energyCost.toFixed(2);
+        const valFixedEl = document.getElementById(`valFixed-${m}`);
+        if (valFixedEl) valFixedEl.innerText = '৳ ' + fixedPerHead.toFixed(2);
+        const valTotalEl = document.getElementById(`valTotal-${m}`);
+        if (valTotalEl) valTotalEl.innerText = '৳ ' + totalPayable.toFixed(2);
+
+        const valPaidEl = document.getElementById(`valPaid-${m}`);
+        if (valPaidEl) valPaidEl.innerText = '৳ ' + paid.toFixed(2);
+        const valNetEl = document.getElementById(`valNet-${m}`);
+        if (valNetEl) valNetEl.innerText = netTextSlip;
+        
+        const slipBox = document.getElementById(`boxNet-${m}`);
+        if (slipBox) {
+          slipBox.className = `flex justify-between items-center text-sm font-black pt-1.5 ${netBoxClass.split(' ')[0]}`;
+        }
+
+        if (m === 'sajen') {
+          const valAgentEl = document.getElementById('valAgent-sajen');
+          if (valAgentEl) valAgentEl.innerText = '+ ৳ ' + halfAgentFee.toFixed(2);
+          const valVatEl = document.getElementById('valVat-sajen');
+          if (valVatEl) valVatEl.innerText = '+ ৳ ' + halfVat.toFixed(2);
+        }
+      });
+
+      const summaryTableEl = document.getElementById('summaryTableBody');
+      if (summaryTableEl) summaryTableEl.innerHTML = summaryRowsHtml;
+
+      const rechargeListEl = document.getElementById('summaryRechargeList');
+      rechargeListEl.innerHTML = '';
+      if (activeRecharges.length > 0) {
+        activeRecharges.forEach(r => {
+          const li = document.createElement('li');
+          li.className = 'py-2.5';
+          const dLabel = r.date ? formatDayMonthFull(r.date, r.date) : 'রিচার্জ';
+          li.innerHTML = `
+            <div class="flex justify-between items-center text-xs">
+              <span class="font-medium text-slate-700">• ${dLabel}:</span>
+              <span class="font-bold text-slate-900">৳ ${r.amount.toFixed(2)} <span class="text-slate-500 font-normal">(ফি: ৳${r.fee.toFixed(0)}, ভ্যাট: ৳${r.vat.toFixed(2)})</span></span>
+            </div>
+          `;
+          rechargeListEl.appendChild(li);
+        });
+      } else {
+        rechargeListEl.innerHTML = '<li class="italic text-slate-400 py-2">কোনো রিচার্জ এন্ট্রি যোগ করা হয়নি</li>';
+      }
+
+      document.getElementById('summaryTotalReload').innerText = '৳ ' + totalRecharge.toFixed(2);
+      document.getElementById('summaryTotalRechargedTop').innerText = '৳ ' + totalRecharge.toFixed(2);
+      document.getElementById('summaryTotalAgent').innerText = '৳ ' + totalAgentFee.toFixed(2);
+      document.getElementById('summaryTotalVat').innerText = '৳ ' + totalVat.toFixed(2);
+
+      document.getElementById('summaryFixedCost').innerText = '৳ ' + totalCommonFixed.toFixed(2);
+      document.getElementById('summaryFixedPerPerson').innerText = '৳ ' + fixedPerHead.toFixed(2);
+      document.getElementById('summarySajenExtra').innerText = '৳ ' + sajenExtraTotal.toFixed(2);
+      document.getElementById('summaryRemainingEnergy').innerText = '৳ ' + remainingEnergyCost.toFixed(2);
+
+      document.getElementById('sumUnits').innerText = totalUnits.toFixed(2);
+      document.getElementById('sumPercent').innerText = totalUnits > 0 ? '100%' : '0%';
+      document.getElementById('sumEnergyCost').innerText = '৳ ' + sumEnergy.toFixed(2);
+      document.getElementById('sumFixed').innerText = '৳ ' + totalCommonFixed.toFixed(2);
+      document.getElementById('sumSajenExtra').innerText = '৳ ' + sajenExtraTotal.toFixed(2);
+      document.getElementById('sumFinalTotal').innerText = '৳ ' + sumGrand.toFixed(2);
+      document.getElementById('sumPaidTotal').innerText = '৳ ' + sumPaid.toFixed(2);
+      document.getElementById('sumNetBalance').innerText = '৳ ' + sumNet.toFixed(2);
+    }
+
+    function saveToLocalStorage() {
+      try {
+        const payload = collectFullState();
+        localStorage.setItem('electricity_bill_state', JSON.stringify(payload));
+      } catch (err) {
+        console.error('Auto-save error', err);
+      }
+    }
+
+    function collectFullState() {
+      return {
+        version: 3.0,
+        savedAt: new Date().toISOString(),
+        prevDate: document.getElementById('prevDate').value,
+        currDate: document.getElementById('currDate').value,
+        meterCharge: document.getElementById('meterCharge').value,
+        demandCharge: document.getElementById('demandCharge').value,
+        rechargeList: rechargeList,
+        readings: {
+          sajen: { prev: document.getElementById('sajen_prev').value, curr: document.getElementById('sajen_curr').value },
+          jahangir: { prev: document.getElementById('jahangir_prev').value, curr: document.getElementById('jahangir_curr').value },
+          khairul: { prev: document.getElementById('khairul_prev').value, curr: document.getElementById('khairul_curr').value },
+          ratul: { prev: document.getElementById('ratul_prev').value, curr: document.getElementById('ratul_curr').value }
+        }
+      };
+    }
+
+    function applyFullState(data) {
+      if (!data) return;
+
+      document.getElementById('prevDate').value = data.prevDate || '';
+      document.getElementById('currDate').value = data.currDate || '';
+      if (data.meterCharge !== undefined) document.getElementById('meterCharge').value = data.meterCharge;
+      if (data.demandCharge !== undefined) document.getElementById('demandCharge').value = data.demandCharge;
+
+      if (Array.isArray(data.rechargeList) && data.rechargeList.length > 0) {
+        rechargeList = data.rechargeList.map(item => ({
+          id: item.id || Date.now() + Math.random(),
+          date: item.date || '',
+          amount: item.amount || '',
+          customVat: item.customVat !== undefined ? item.customVat : null,
+          contributors: item.contributors || { sajen: '', jahangir: '', khairul: '', ratul: '' }
+        }));
+      } else {
+        rechargeList = [
+          { id: 1, date: '', amount: '', customVat: null, contributors: { sajen: '', jahangir: '', khairul: '', ratul: '' } },
+          { id: 2, date: '', amount: '', customVat: null, contributors: { sajen: '', jahangir: '', khairul: '', ratul: '' } },
+          { id: 3, date: '', amount: '', customVat: null, contributors: { sajen: '', jahangir: '', khairul: '', ratul: '' } }
+        ];
+      }
+
+      if (data.readings) {
+        memberIds.forEach(m => {
+          if (data.readings[m]) {
+            document.getElementById(`${m}_prev`).value = data.readings[m].prev || '';
+            document.getElementById(`${m}_curr`).value = data.readings[m].curr || '';
+          } else {
+            document.getElementById(`${m}_prev`).value = '';
+            document.getElementById(`${m}_curr`).value = '';
+          }
+        });
+      } else {
+        clearAllReadings();
+      }
+
+      initRechargeCards();
+      calculateBill();
+    }
+
+    function downloadContainer(elementId, fileName) {
+      const element = document.getElementById(elementId);
+      if (!element) return;
+
+      showToast('ছবি তৈরি হচ্ছে, অপেক্ষা করুন...', '⏳');
+      const readyPromise = document.fonts ? document.fonts.ready : Promise.resolve();
+
+      readyPromise.then(() => {
+        html2canvas(element, {
+          scale: 2.2,
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#ffffff',
+          scrollY: -window.scrollY,
+          onclone: (clonedDoc) => {
+            const clonedContainer = clonedDoc.getElementById(elementId);
+            if (!clonedContainer) return;
+
+            const allBadges = clonedContainer.querySelectorAll('.badge-pill, #monthlyBadge, #sheetBillingRange, [id^="badge-"]');
+            allBadges.forEach(badge => {
+              badge.style.display = 'inline-flex';
+              badge.style.alignItems = 'center';
+              badge.style.justifyContent = 'center';
+              badge.style.paddingTop = '3px';
+              badge.style.paddingBottom = '6px';
+              const textSpan = badge.querySelector('span') || badge;
+              textSpan.style.display = 'inline-block';
+              textSpan.style.transform = 'translateY(-3.5px)';
+            });
+
+            const topReloadBox = clonedContainer.querySelector('#boxTotalRecharged');
+            if (topReloadBox) {
+              topReloadBox.style.paddingTop = '6px';
+              topReloadBox.style.paddingBottom = '10px';
+              Array.from(topReloadBox.children).forEach(child => {
+                child.style.display = 'inline-block';
+                child.style.transform = 'translateY(-3.5px)';
+              });
+            }
+
+            const tableCells = clonedContainer.querySelectorAll('th, td');
+            tableCells.forEach(cell => {
+              cell.style.verticalAlign = 'middle';
+              cell.style.paddingTop = '7px';
+              cell.style.paddingBottom = '10px';
+              const spans = cell.querySelectorAll('span');
+              if (spans.length > 0) {
+                spans.forEach(s => {
+                  s.style.display = 'inline-block';
+                  s.style.transform = 'translateY(-2.5px)';
+                });
+              } else {
+                cell.style.transform = 'translateY(-2px)';
+              }
+            });
+
+            const slipValueRows = clonedContainer.querySelectorAll('[id^="valPrev-"], [id^="valCurr-"], [id^="valUnit-"], [id^="valPct-"], [id^="valEnergy-"], [id^="valFixed-"], [id^="valTotal-"], [id^="valPaid-"], [id^="valNet-"]');
+            slipValueRows.forEach(el => {
+              el.style.display = 'inline-block';
+              el.style.transform = 'translateY(-2.5px)';
+            });
+          }
+        }).then((canvas) => {
+          const link = document.createElement('a');
+          link.download = fileName;
+          link.href = canvas.toDataURL('image/png', 1.0);
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          showToast('ছবি ডাউনলোড সম্পন্ন হয়েছে!');
+        }).catch((err) => {
+          console.error('html2canvas capture error:', err);
+          showToast('ছবি তৈরিতে সমস্যা হয়েছে!', '❌');
+        });
+      });
+    }
+
+    window.collectFullState = collectFullState;
+    window.applyFullState = applyFullState;
+    window.parseDateParts = parseDateParts;
+    window.bengaliMonths = bengaliMonths;
+    window.downloadContainer = downloadContainer;
+    window.showToast = showToast;
+
+    window.addEventListener('DOMContentLoaded', () => {
+      initRechargeCards();
+      calculateBill();
+    });
+  </script>
+</body>
+</html>
