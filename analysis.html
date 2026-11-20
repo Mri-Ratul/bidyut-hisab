@@ -2,7 +2,7 @@
 <html lang="bn">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta id="viewportMeta" name="viewport" content="width=1200" />
   <title>বিদ্যুৎ বিল এনালাইসিস ড্যাশবোর্ড</title>
 
   <!-- Tailwind CSS CDN -->
@@ -63,7 +63,7 @@
       ratul: { main: '#9333ea', light: 'rgba(147, 51, 234, 0.15)', bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', dot: 'bg-purple-600' }
     };
 
-    // কাস্টম Chart.js প্লাগইন: বার চার্টের মাথার ওপর সরাসরি টাকার অ্যামাউন্ট দেখানোর জন্য (মোবাইলে হোভার ছাড়াই দৃশ্যমান)
+    // কাস্টম Chart.js প্লাগইন: বার চার্টের মাথার ওপর সরাসরি টাকার অ্যামাউন্ট দেখানোর জন্য
     const barTopLabelPlugin = {
       id: 'barTopLabelPlugin',
       afterDatasetsDraw(chart) {
@@ -251,8 +251,6 @@
         });
 
         allProcessedBills = rawList;
-
-        // একক মাস সিলেক্টর ড্রপডাউন পপুলেট করা (ডিফল্ট সর্বশেষ মাস)
         populateSingleMonthDropdown();
 
         loader.classList.add('hidden');
@@ -269,7 +267,6 @@
       const selectEl = document.getElementById('singleMonthSelect');
       if (!selectEl || allProcessedBills.length === 0) return;
 
-      // সাম্প্রতিকতম মাসগুলো উপরে রাখার জন্য রিভার্স লিস্ট
       const reversed = allProcessedBills.slice().reverse();
       selectEl.innerHTML = reversed.map(b =>
         `<option value="${b.id}">${b.cycleTitle}</option>`
@@ -316,17 +313,13 @@
       if (bills.length === 0) return;
 
       renderTopKPIs(bills);
-      // ১ নম্বর সেকশন: একক মাসের বিস্তারিত বিল ওভারভিউ (বামে চার্ট + ডানে কার্ড)
       renderSingleMonthOverview();
-      // ২ নম্বর সেকশন: বিগত ৩ মাসের তুলনামূলক ওভারভিউ (শুধুমাত্র সর্বশেষ ৩টি সাইকেল)
       const lastThreeBills = allProcessedBills.slice(-3);
       renderMonthlyPersonBillChart(lastThreeBills);
       renderMonthlyBillBoxes(lastThreeBills);
-      // ৩ নম্বর সেকশন: সমন্বিত বাসার বিদ্যুৎ বিশ্লেষণ
       renderTrendChart(bills);
       renderCostRatioChart(bills);
       renderEfficiencyTable(bills);
-      // ৪ নম্বর সেকশন: রুমভিত্তিক তুলনা ও ব্যক্তিগত ইতিহাস
       renderRoomShareChart(bills);
       renderHeadToHeadCards(bills);
       renderIndividualSection(bills);
@@ -356,12 +349,10 @@
       document.getElementById('kpiTopConsumer').innerText = `${memberNames[topMember]} (${memberTotalUnits[topMember].toFixed(1)} Unit)`;
     }
 
-    // ১. একক মাসের বিস্তারিত বিল ওভারভিউ (বামে বার চার্ট + ডানে কার্ড)
     function renderSingleMonthOverview() {
       const bill = allProcessedBills.find(b => b.id === selectedSingleBillId) || allProcessedBills[allProcessedBills.length - 1];
       if (!bill) return;
 
-      // বাম পাশের চার্ট
       const ctx = document.getElementById('singleMonthChart').getContext('2d');
       if (singleMonthChartInstance) singleMonthChartInstance.destroy();
 
@@ -407,7 +398,6 @@
         }
       });
 
-      // ডান পাশের সামারি কার্ড
       const cardContainer = document.getElementById('singleMonthCardContainer');
       const modeBadge = bill.billingModel === 'sajen_extra'
         ? `<span class="bg-amber-100 text-amber-800 text-[11px] font-bold px-2.5 py-0.5 rounded-full">সাজেন ৫০%</span>`
@@ -455,7 +445,6 @@
       `;
     }
 
-    // ২(ক). বিগত ৩ মাসের ৪ জনের বিলের Grouped Bar Chart (বারের মাথার ওপর অ্যামাউন্টসহ)
     function renderMonthlyPersonBillChart(bills) {
       const ctx = document.getElementById('monthlyPersonBillChart').getContext('2d');
       if (monthlyPersonBillChartInstance) monthlyPersonBillChartInstance.destroy();
@@ -508,7 +497,6 @@
       });
     }
 
-    // ২(খ). বিগত ৩ মাসের ৪ জনের বিলের বক্স ওভারভিউ
     function renderMonthlyBillBoxes(bills) {
       const container = document.getElementById('monthlyBillBoxesContainer');
       let html = '';
@@ -561,7 +549,6 @@
       container.innerHTML = html;
     }
 
-    // ৩(ক). মাসিক ইউনিট ও খরচের ট্রেন্ড (Dual-Axis Line + Bar)
     function renderTrendChart(bills) {
       const ctx = document.getElementById('trendChart').getContext('2d');
       if (trendChartInstance) trendChartInstance.destroy();
@@ -627,7 +614,6 @@
       });
     }
 
-    // ৩(খ). প্রকৃত এনার্জি বনাম অতিরিক্ত চার্জের অনুপাত (Doughnut Chart)
     function renderCostRatioChart(bills) {
       const ctx = document.getElementById('costRatioChart').getContext('2d');
       if (costRatioChartInstance) costRatioChartInstance.destroy();
@@ -670,7 +656,6 @@
       });
     }
 
-    // ৩(গ). গড় ইউনিট রেট ও ইফিশিয়েন্সি মেট্রিক টেবিল
     function renderEfficiencyTable(bills) {
       const tbody = document.getElementById('efficiencyTableBody');
       let html = '';
@@ -697,7 +682,6 @@
       tbody.innerHTML = html;
     }
 
-    // ৪(ক). খরচের ভাগীদার অনুপাত (Pie Chart)
     function renderRoomShareChart(bills) {
       const ctx = document.getElementById('roomShareChart').getContext('2d');
       if (roomShareChartInstance) roomShareChartInstance.destroy();
@@ -727,7 +711,6 @@
       });
     }
 
-    // ৪(খ). পাশাপাশি ৪ জনের এভারেজ ইউনিট খরচ ও বাল্ব সমন্বয় সামারি
     function renderHeadToHeadCards(bills) {
       const container = document.getElementById('headToHeadContainer');
       const count = bills.length;
@@ -784,7 +767,6 @@
       container.innerHTML = html;
     }
 
-    // ৪(গ). ব্যক্তিগত ব্যবহারের ইতিহাস
     function renderIndividualSection(bills) {
       const m = selectedMember;
       const c = memberColors[m];
@@ -878,6 +860,27 @@
       tbody.innerHTML = rowsHtml;
     }
 
+    // ডেস্কটপ ও মোবাইল ভিউপোর্ট মোড সুইচ করার ফাংশন
+    let isDesktopViewport = true;
+
+    window.toggleViewportMode = function() {
+      const meta = document.getElementById('viewportMeta');
+      const btnText = document.getElementById('viewportToggleText');
+      const btnIcon = document.getElementById('viewportToggleIcon');
+      if (!meta) return;
+
+      isDesktopViewport = !isDesktopViewport;
+      if (isDesktopViewport) {
+        meta.setAttribute('content', 'width=1200');
+        if (btnText) btnText.innerText = 'মোবাইল ভিউ';
+        if (btnIcon) btnIcon.innerText = '📱';
+      } else {
+        meta.setAttribute('content', 'width=device-width, initial-scale=1.0');
+        if (btnText) btnText.innerText = 'ডেস্কটপ ভিউ';
+        if (btnIcon) btnIcon.innerText = '🖥️';
+      }
+    };
+
     window.addEventListener('DOMContentLoaded', fetchAndRenderAnalytics);
   </script>
 </head>
@@ -894,6 +897,11 @@
       </div>
 
       <div class="flex items-center gap-2">
+        <button type="button" onclick="toggleViewportMode()" title="ডেস্কটপ এবং মোবাইল ভিউ পরিবর্তন করুন" class="bg-white/15 hover:bg-white/25 text-white border border-white/20 text-xs font-bold px-3 py-2 rounded-lg transition flex items-center gap-1.5 shadow-sm">
+          <span id="viewportToggleIcon">📱</span>
+          <span id="viewportToggleText">মোবাইল ভিউ</span>
+        </button>
+
         <a href="index.html" class="bg-white text-indigo-900 hover:bg-indigo-50 text-xs font-bold px-3.5 py-2 rounded-lg transition flex items-center gap-1.5 shadow">
           <span>⬅️</span> ক্যালকুলেটরে ফিরুন
         </a>
@@ -964,9 +972,7 @@
           </div>
           <div class="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-indigo-200 shadow-sm">
             <label for="singleMonthSelect" class="text-xs font-bold text-slate-600">মাস নির্বাচন:</label>
-            <select id="singleMonthSelect" onchange="onSingleMonthSelectChange(this.value)" class="bg-transparent text-indigo-900 text-xs sm:text-sm font-black outline-none cursor-pointer">
-              <!-- Populated dynamically -->
-            </select>
+            <select id="singleMonthSelect" onchange="onSingleMonthSelectChange(this.value)" class="bg-transparent text-indigo-900 text-xs sm:text-sm font-black outline-none cursor-pointer"></select>
           </div>
         </div>
 
@@ -982,9 +988,7 @@
           </div>
 
           <!-- Right Side: Single Month Summary Card -->
-          <div class="lg:col-span-5" id="singleMonthCardContainer">
-            <!-- Populated dynamically -->
-          </div>
+          <div class="lg:col-span-5" id="singleMonthCardContainer"></div>
         </div>
       </div>
 
@@ -1008,9 +1012,7 @@
         </div>
 
         <!-- Last 3 Months Individual Bill Boxes -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="monthlyBillBoxesContainer">
-          <!-- Populated dynamically -->
-        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="monthlyBillBoxesContainer"></div>
       </div>
 
       <!-- SECTION 3: Macro / Combined Analysis -->
