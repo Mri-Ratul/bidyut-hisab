@@ -1077,6 +1077,7 @@ function setBillingModel(model) {
         const el = document.getElementById(`contrib-${id}-${m}`);
         if (el) el.value = target.contributors[m];
       });
+      highlightQuickDonorBtn(id, memberKey);
       updateContribStatusText(id);
       calculateBill();
       saveToLocalStorage();
@@ -1092,6 +1093,7 @@ function setBillingModel(model) {
         const el = document.getElementById(`contrib-${id}-${m}`);
         if (el) el.value = share;
       });
+      highlightQuickDonorBtn(id, 'equal');
       updateContribStatusText(id);
       calculateBill();
       saveToLocalStorage();
