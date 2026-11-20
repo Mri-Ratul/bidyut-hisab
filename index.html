@@ -974,19 +974,27 @@ function setBillingModel(model) {
     }
 
     // স্মার্ট ডেটপিকার ফোকাস হ্যান্ডলার
+    // স্মার্ট ডেটপিকার ফোকাস হ্যান্ডলার
     function handleDateFocus(inputId, monthOffset = 0) {
       const el = document.getElementById(inputId);
-      if (!el || el.value) return;
+      if (!el) return;
 
-      const d = new Date();
-      d.setMonth(d.getMonth() + monthOffset);
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      
-      el.value = `${yyyy}-${mm}-${dd}`;
-      calculateBill();
-      saveToLocalStorage();
+      if (!el.value) {
+        const d = new Date();
+        d.setMonth(d.getMonth() + monthOffset);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        
+        el.value = `${yyyy}-${mm}-${dd}`;
+        calculateBill();
+        saveToLocalStorage();
+      }
+
+      // পূর্ববর্তী রিডিংয়ের তারিখে ফোকাস/ক্লিক করলেই ফায়ারস্টোর চেক করবে
+      if (inputId === 'prevDate' && el.value && typeof window.autoFillPreviousReadings === 'function') {
+        window.autoFillPreviousReadings(el.value);
+      }
 
       if (typeof el.showPicker === 'function') {
         try { el.showPicker(); } catch (e) {}
