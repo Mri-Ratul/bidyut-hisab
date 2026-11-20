@@ -68,6 +68,7 @@
       addDoc, 
       getDocs, 
       query, 
+	where,
       orderBy, 
       deleteDoc, 
       doc, 
@@ -237,6 +238,42 @@
         window.showToast("পূর্ববর্তী মাসের বিল সফলভাবে লোড হয়েছে!", "✅");
       }
     };
+// পূর্ববর্তী তারিখের সাথে মিলিয়ে ফায়ারস্টোর থেকে আগের মাসের শেষ রিডিং অটো-ফিল করা
+window.autoFillPreviousReadings = async function(selectedPrevDate) {
+  if (!db || !selectedPrevDate) return;
+
+  try {
+    const q = query(collection(db, "monthly_bills"), where("currDate", "==", selectedPrevDate));
+    const querySnapshot = await getDocs(q);
+
+    if (!querySnapshot.empty) {
+      // ম্যাচিং রেকর্ড পাওয়া গেলে প্রথম ডকুমেন্টটি নেওয়া হচ্ছে
+      const prevBillData = querySnapshot.docs[0].data();
+      
+      if (prevBillData && prevBillData.readings) {
+        const members = ['sajen', 'jahangir', 'khairul', 'ratul'];
+        let filledCount = 0;
+
+        members.forEach(m => {
+          const prevMonthEndReading = prevBillData.readings[m]?.curr;
+          const prevInputEl = document.getElementById(`${m}_prev`);
+          if (prevInputEl && prevMonthEndReading !== undefined && prevMonthEndReading !== '') {
+            prevInputEl.value = prevMonthEndReading;
+            filledCount++;
+          }
+        });
+
+        if (filledCount > 0) {
+          window.calculateBill();
+          window.saveToLocalStorage();
+          window.showToast(`গত সাইকেলের (${selectedPrevDate}) শেষ রিডিং অটো-ফিল হয়েছে!`, "⚡");
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Auto-fill previous readings error:", err);
+  }
+};
 
     // ডিলিট করার সময় পাসওয়ার্ড ভেরিফিকেশন
     window.deleteBillRecord = async function(docId) {
@@ -283,16 +320,18 @@
           <span>☁️</span> ক্লাউডে সেভ করুন
         </button>
 
-        <!-- Analysis Button (New) -->
+        <!-- Analysis Button -->
         <button onclick="handleAnalysisClick()" title="বিশ্লেষণ ও পরিসংখ্যান পেজ" class="bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 shadow">
           <span>📊</span> এনালাইসিস
         </button>
 
-        <!-- Billing Mode Selector (Short & Clean) -->
-<select id="billingModelSelect" onchange="calculateBill(); saveToLocalStorage();" class="bg-white/15 hover:bg-white/25 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg transition outline-none cursor-pointer shadow-sm">
-  <option value="sajen_extra" class="text-slate-800 font-medium">সাজেন ৫০%</option>
-  <option value="equal_split" class="text-slate-800 font-medium">সমান ভাগ</option>
-</select>
+       <!-- Smart Compact Single-Click Toggle Switch -->
+<button type="button" id="billingToggleBtn" onclick="toggleBillingModel()" title="ক্লিক করে হিসাবের মোড পরিবর্তন করুন" class="bg-white/15 hover:bg-white/25 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg transition flex items-center gap-2 shadow-sm border border-white/15 select-none">
+  <span id="billingToggleTrack" class="w-7 h-4 bg-white/30 rounded-full relative inline-flex items-center p-0.5 transition-colors duration-200">
+    <span id="billingToggleThumb" class="w-3 h-3 bg-white rounded-full shadow transform translate-x-0 transition-transform duration-200"></span>
+  </span>
+  <span id="billingToggleText">সমান ভাগ</span>
+</button>
 
         <button onclick="downloadContainer('full-summary-sheet', 'Full_Electricity_Statement.png')" class="bg-amber-400 hover:bg-amber-500 text-slate-900 text-xs font-bold px-3 py-1.5 rounded-lg transition flex items-center gap-1 shadow">
           <span>🖼️</span> শিট ছবি (PNG)
@@ -354,7 +393,7 @@
         </div>
       </div>
 
-      <!-- 3 Dynamic Recharge Cards -->
+      <!-- Dynamic Recharge Cards -->
       <div class="border-t border-slate-200 pt-4">
         <div class="flex flex-wrap justify-between items-center gap-2 mb-3">
           <div>
@@ -538,14 +577,14 @@
           </div>
 
           <div class="flex justify-between text-slate-600 pt-1">
-            <span id="lblCommonFixedTitle">কমন চার্জ (অর্ধেক এজেন্ট ফি + মিটার + ডিমান্ড + অর্ধেক ভ্যাট):</span>
+            <span id="lblCommonFixedTitle">কমন চার্জ (সম্পূর্ণ এজেন্ট ফি + মিটার + ডিমান্ড + সম্পূর্ণ ভ্যাট):</span>
             <span class="font-semibold text-slate-800" id="summaryFixedCost">৳ 0.00</span>
           </div>
           <div class="flex justify-between text-slate-600">
             <span>প্রতি জনের সমান চার্জের ভাগ (÷ ৪):</span>
             <span class="font-bold text-blue-700" id="summaryFixedPerPerson">৳ 0.00</span>
           </div>
-          <div id="rowSajenExtra" class="flex justify-between text-slate-600">
+          <div id="rowSajenExtra" class="hidden flex justify-between text-slate-600">
             <span>সাজেনের একক চার্জ (অর্ধেক এজেন্ট + অর্ধেক ভ্যাট):</span>
             <span class="font-semibold text-amber-700" id="summarySajenExtra">৳ 0.00</span>
           </div>
@@ -568,7 +607,7 @@
               <th class="p-2.5 border border-slate-700 text-right">এনার্জি বিল (৳)</th>
               <th class="p-2.5 border border-slate-700 text-right">চার্জের ভাগ (৳)</th>
               <th class="p-2.5 border border-slate-700 text-center">বাল্ব সমন্বয়</th>
-              <th class="p-2 border border-slate-700 text-right" id="thSajenExtra">সাজেন অতিরিক্ত</th>
+              <th class="p-2 border border-slate-700 text-right hidden" id="thSajenExtra">সাজেন অতিরিক্ত</th>
               <th class="p-2.5 border border-slate-700 text-right font-black bg-slate-900">প্রদেয় বিল (৳)</th>
               <th class="p-2.5 border border-slate-700 text-right font-bold">প্রদত্ত টাকা</th>
               <th class="p-2.5 border border-slate-700 text-center font-black">দেনা / পাওনা</th>
@@ -583,7 +622,7 @@
               <td class="p-2.5 border border-slate-200 text-right" id="sumEnergyCost">৳ 0.00</td>
               <td class="p-2.5 border border-slate-200 text-right" id="sumFixed">৳ 0.00</td>
               <td class="p-2.5 border border-slate-200 text-center">৳ 0.00</td>
-              <td class="p-2.5 border border-slate-200 text-right" id="sumSajenExtra">৳ 0.00</td>
+              <td class="p-2.5 border border-slate-200 text-right hidden" id="sumSajenExtra">৳ 0.00</td>
               <td class="p-2.5 border border-slate-200 text-right font-black text-indigo-900" id="sumFinalTotal">৳ 0.00</td>
               <td class="p-2.5 border border-slate-200 text-right font-black text-blue-900 whitespace-nowrap" id="sumPaidTotal">৳ 0.00</td>
               <td class="p-2.5 border border-slate-200 text-center font-black text-slate-900" id="sumNetBalance">৳ 0.00</td>
@@ -635,18 +674,18 @@
                 <span class="font-semibold text-slate-800" id="valEnergy-sajen">৳ 0.00</span>
               </div>
               <div class="flex justify-between">
-                <span id="lblFixedBreakdown-sajen">চার্জের ভাগ (অর্ধেক এজেন্ট ফি + অর্ধেক ভ্যাট + মিটার চার্জ + ডিমান্ড চার্জ):</span>
+                <span id="lblFixedBreakdown-sajen">চার্জের ভাগ (মোট এজেন্ট ফি + ভ্যাট + মিটার চার্জ + ডিমান্ড চার্জ ÷ ৪):</span>
                 <span class="font-semibold text-slate-800" id="valFixed-sajen">৳ 0.00</span>
               </div>
               <div class="flex justify-between">
                 <span>কমন বাল্বের চার্জ:</span>
                 <span class="font-semibold text-emerald-600">+ ৳ 25.00</span>
               </div>
-              <div class="flex justify-between text-amber-800" id="rowSlipAgentSajen">
+              <div class="hidden flex justify-between text-amber-800" id="rowSlipAgentSajen">
                 <span>অর্ধেক এজেন্ট চার্জ (সাজেন একক):</span>
                 <span class="font-semibold" id="valAgent-sajen">+ ৳ 0.00</span>
               </div>
-              <div class="flex justify-between text-amber-800" id="rowSlipVatSajen">
+              <div class="hidden flex justify-between text-amber-800" id="rowSlipVatSajen">
                 <span>অর্ধেক ভ্যাট (সাজেন একক):</span>
                 <span class="font-semibold" id="valVat-sajen">+ ৳ 0.00</span>
               </div>
@@ -706,7 +745,7 @@
                 <span class="font-semibold text-slate-800" id="valEnergy-jahangir">৳ 0.00</span>
               </div>
               <div class="flex justify-between">
-                <span id="lblFixedBreakdown-jahangir">চার্জের ভাগ (অর্ধেক এজেন্ট ফি + অর্ধেক ভ্যাট + মিটার চার্জ + ডিমান্ড চার্জ):</span>
+                <span id="lblFixedBreakdown-jahangir">চার্জের ভাগ (মোট এজেন্ট ফি + ভ্যাট + মিটার চার্জ + ডিমান্ড চার্জ ÷ ৪):</span>
                 <span class="font-semibold text-slate-800" id="valFixed-jahangir">৳ 0.00</span>
               </div>
               <div class="flex justify-between">
@@ -769,7 +808,7 @@
                 <span class="font-semibold text-slate-800" id="valEnergy-khairul">৳ 0.00</span>
               </div>
               <div class="flex justify-between">
-                <span id="lblFixedBreakdown-khairul">চার্জের ভাগ (অর্ধেক এজেন্ট ফি + অর্ধেক ভ্যাট + মিটার চার্জ + ডিমান্ড চার্জ):</span>
+                <span id="lblFixedBreakdown-khairul">চার্জের ভাগ (মোট এজেন্ট ফি + ভ্যাট + মিটার চার্জ + ডিমান্ড চার্জ ÷ ৪):</span>
                 <span class="font-semibold text-slate-800" id="valFixed-khairul">৳ 0.00</span>
               </div>
               <div class="flex justify-between">
@@ -832,7 +871,7 @@
                 <span class="font-semibold text-slate-800" id="valEnergy-ratul">৳ 0.00</span>
               </div>
               <div class="flex justify-between">
-                <span id="lblFixedBreakdown-ratul">চার্জের ভাগ (অর্ধেক এজেন্ট ফি + অর্ধেক ভ্যাট + মিটার চার্জ + ডিমান্ড চার্জ):</span>
+                <span id="lblFixedBreakdown-ratul">চার্জের ভাগ (মোট এজেন্ট ফি + ভ্যাট + মিটার চার্জ + ডিমান্ড চার্জ ÷ ৪):</span>
                 <span class="font-semibold text-slate-800" id="valFixed-ratul">৳ 0.00</span>
               </div>
               <div class="flex justify-between text-rose-600">
@@ -868,6 +907,11 @@
   </main>
 
   <script>
+    // =========================================================================
+    // ডিফল্ট রিচার্জ কার্ডের সংখ্যা (এখানে ২-এর বদলে ৩ বা অন্য সংখ্যা লিখলেই ততগুলো কার্ড আসবে)
+    // =========================================================================
+    const DEFAULT_RECHARGE_CARDS = 2;
+
     const bengaliMonths = ['জানু', 'ফেব্রু', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টে', 'অক্টো', 'নভে', 'ডিসে'];
     const bengaliMonthsFull = ['জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'];
 
@@ -875,12 +919,47 @@
     const memberShortNames = { sajen: 'সাজেন', jahangir: 'জাহাঙ্গীর', khairul: 'খাইরুল', ratul: 'রাতুল' };
     const memberDisplayNames = { sajen: '১. সাজেন', jahangir: '২. জাহাঙ্গীর', khairul: '৩. খাইরুল', ratul: '৪. রাতুল' };
 
-    // ৩টি সম্পূর্ণ ব্ল্যাঙ্ক এন্ট্রি দিয়ে শুরু
-    let rechargeList = [
-      { id: 1, date: '', amount: '', customVat: null, contributors: { sajen: '', jahangir: '', khairul: '', ratul: '' } },
-      { id: 2, date: '', amount: '', customVat: null, contributors: { sajen: '', jahangir: '', khairul: '', ratul: '' } },
-      { id: 3, date: '', amount: '', customVat: null, contributors: { sajen: '', jahangir: '', khairul: '', ratul: '' } }
-    ];
+    // ডিফল্ট মডেল: সমান ভাগ ('equal_split')
+    let currentBillingModel = 'equal_split';
+
+    function createDefaultRechargeList(count) {
+      return Array.from({ length: count }, (_, idx) => ({
+        id: idx + 1,
+        date: '',
+        amount: '',
+        customVat: null,
+        contributors: { sajen: '', jahangir: '', khairul: '', ratul: '' }
+      }));
+    }
+
+    let rechargeList = createDefaultRechargeList(DEFAULT_RECHARGE_CARDS);
+
+    function toggleBillingModel() {
+  const nextModel = (currentBillingModel === 'equal_split') ? 'sajen_extra' : 'equal_split';
+  setBillingModel(nextModel);
+}
+
+function setBillingModel(model) {
+  currentBillingModel = model;
+  const track = document.getElementById('billingToggleTrack');
+  const thumb = document.getElementById('billingToggleThumb');
+  const label = document.getElementById('billingToggleText');
+
+  if (track && thumb && label) {
+    if (model === 'equal_split') {
+      track.className = 'w-7 h-4 bg-white/30 rounded-full relative inline-flex items-center p-0.5 transition-colors duration-200';
+      thumb.className = 'w-3 h-3 bg-white rounded-full shadow transform translate-x-0 transition-transform duration-200';
+      label.innerText = '÷৪';
+    } else {
+      track.className = 'w-7 h-4 bg-amber-400 rounded-full relative inline-flex items-center p-0.5 transition-colors duration-200';
+      thumb.className = 'w-3 h-3 bg-slate-900 rounded-full shadow transform translate-x-3 transition-transform duration-200';
+      label.innerText = '৫০%';
+    }
+  }
+
+  calculateBill();
+  saveToLocalStorage();
+}
 
     function showToast(text, icon = '✅') {
       const toast = document.getElementById('toastMessage');
@@ -1163,9 +1242,13 @@
     }
 
     function handleDateChange() {
-      calculateBill();
-      saveToLocalStorage();
-    }
+  const prevDateVal = document.getElementById('prevDate').value;
+  if (prevDateVal && typeof window.autoFillPreviousReadings === 'function') {
+    window.autoFillPreviousReadings(prevDateVal);
+  }
+  calculateBill();
+  saveToLocalStorage();
+}
 
     function clearAllReadings() {
       memberIds.forEach(m => {
@@ -1212,7 +1295,7 @@
     function calculateBill() {
       const prevDateVal = document.getElementById('prevDate').value;
       const currDateVal = document.getElementById('currDate').value;
-      const billingModel = document.getElementById('billingModelSelect')?.value || 'sajen_extra';
+      const billingModel = currentBillingModel;
 
       const cleanCycleText = formatCleanCycleBadge(prevDateVal, currDateVal);
       document.getElementById('sheetBillingRange').innerHTML = `<span>${cleanCycleText}</span>`;
@@ -1265,6 +1348,9 @@
       let halfAgentFee = totalAgentFee / 2;
       let halfVat = totalVat / 2;
 
+      const thSajenExtra = document.getElementById('thSajenExtra');
+      const sumSajenExtraEl = document.getElementById('sumSajenExtra');
+
       if (billingModel === 'sajen_extra') {
         // মডেল ১: বর্তমান অক্সিজেন সমন্বয় নিয়ম (৫০% কমন, ৫০% সাজেন একক)
         totalCommonFixed = halfAgentFee + meterCharge + demandCharge + halfVat;
@@ -1272,7 +1358,8 @@
 
         document.getElementById('lblCommonFixedTitle').innerText = 'কমন চার্জ (অর্ধেক এজেন্ট ফি + মিটার + ডিমান্ড + অর্ধেক ভ্যাট):';
         document.getElementById('rowSajenExtra').classList.remove('hidden');
-        document.getElementById('thSajenExtra').innerText = 'সাজেন অতিরিক্ত';
+        if (thSajenExtra) thSajenExtra.classList.remove('hidden');
+        if (sumSajenExtraEl) sumSajenExtraEl.classList.remove('hidden');
         document.getElementById('rowSlipAgentSajen').classList.remove('hidden');
         document.getElementById('rowSlipVatSajen').classList.remove('hidden');
 
@@ -1281,13 +1368,14 @@
           if (lbl) lbl.innerText = 'চার্জের ভাগ (অর্ধেক এজেন্ট ফি + অর্ধেক ভ্যাট + মিটার চার্জ + ডিমান্ড চার্জ):';
         });
       } else {
-        // মডেল ২: সমান চার ভাগ (সব এজেন্ট ফি ও ভ্যাট সমান চার ভাগে ভাগ)
+        // মডেল ২: সমান চার ভাগ (সব এজেন্ট ফি ও ভ্যাট সমান চার ভাগে ভাগ এবং কলাম হাইড)
         totalCommonFixed = totalAgentFee + meterCharge + demandCharge + totalVat;
         sajenExtraTotal = 0;
 
         document.getElementById('lblCommonFixedTitle').innerText = 'কমন চার্জ (সম্পূর্ণ এজেন্ট ফি + মিটার + ডিমান্ড + সম্পূর্ণ ভ্যাট):';
         document.getElementById('rowSajenExtra').classList.add('hidden');
-        document.getElementById('thSajenExtra').innerText = 'সাজেন অতিরিক্ত (মুক্ত)';
+        if (thSajenExtra) thSajenExtra.classList.add('hidden');
+        if (sumSajenExtraEl) sumSajenExtraEl.classList.add('hidden');
         document.getElementById('rowSlipAgentSajen').classList.add('hidden');
         document.getElementById('rowSlipVatSajen').classList.add('hidden');
 
@@ -1371,6 +1459,10 @@
           netBoxClass = 'text-emerald-700 bg-emerald-50';
         }
 
+        const extraCellHtml = (billingModel === 'sajen_extra')
+          ? `<td class="p-2.5 text-right whitespace-nowrap ${extra > 0 ? 'font-bold text-amber-700' : 'text-slate-400'}">${extra > 0 ? '৳ ' + extra.toFixed(2) : '-'}</td>`
+          : '';
+
         summaryRowsHtml += `
           <tr class="hover:bg-slate-50 transition">
             <td class="p-2.5 font-bold text-slate-800 whitespace-nowrap">${memberDisplayNames[m]}</td>
@@ -1379,7 +1471,7 @@
             <td class="p-2.5 text-right font-medium text-slate-700 whitespace-nowrap">৳ ${energyCost.toFixed(2)}</td>
             <td class="p-2.5 text-right text-slate-700 whitespace-nowrap">৳ ${fixedPerHead.toFixed(2)}</td>
             <td class="p-2.5 text-center font-bold whitespace-nowrap ${bulb < 0 ? 'text-rose-600' : 'text-emerald-700'}">${bulb < 0 ? '- ৳ 75.00' : '+ ৳ 25.00'}</td>
-            <td class="p-2.5 text-right whitespace-nowrap ${extra > 0 ? 'font-bold text-amber-700' : 'text-slate-400'}">${extra > 0 ? '৳ ' + extra.toFixed(2) : '-'}</td>
+            ${extraCellHtml}
             <td class="p-2.5 text-right font-black text-indigo-950 bg-indigo-50/40 whitespace-nowrap">৳ ${totalPayable.toFixed(2)}</td>
             <td class="p-2.5 text-right font-bold text-blue-900 whitespace-nowrap">৳ ${paid.toFixed(2)}</td>
             <td class="p-2.5 text-center whitespace-nowrap">${netBadgeHtml}</td>
@@ -1458,7 +1550,7 @@
       document.getElementById('sumPercent').innerText = totalUnits > 0 ? '100%' : '0%';
       document.getElementById('sumEnergyCost').innerText = '৳ ' + sumEnergy.toFixed(2);
       document.getElementById('sumFixed').innerText = '৳ ' + totalCommonFixed.toFixed(2);
-      document.getElementById('sumSajenExtra').innerText = '৳ ' + sajenExtraTotal.toFixed(2);
+      if (sumSajenExtraEl) sumSajenExtraEl.innerText = '৳ ' + sajenExtraTotal.toFixed(2);
       document.getElementById('sumFinalTotal').innerText = '৳ ' + sumGrand.toFixed(2);
       document.getElementById('sumPaidTotal').innerText = '৳ ' + sumPaid.toFixed(2);
       document.getElementById('sumNetBalance').innerText = '৳ ' + sumNet.toFixed(2);
@@ -1475,9 +1567,9 @@
 
     function collectFullState() {
       return {
-        version: 3.1,
+        version: 3.2,
         savedAt: new Date().toISOString(),
-        billingModel: document.getElementById('billingModelSelect')?.value || 'sajen_extra',
+        billingModel: currentBillingModel,
         prevDate: document.getElementById('prevDate').value,
         currDate: document.getElementById('currDate').value,
         meterCharge: document.getElementById('meterCharge').value,
@@ -1495,9 +1587,9 @@
     function applyFullState(data) {
       if (!data) return;
 
-      if (data.billingModel !== undefined && document.getElementById('billingModelSelect')) {
-        document.getElementById('billingModelSelect').value = data.billingModel;
-      }
+      const modelToApply = data.billingModel || 'equal_split';
+      setBillingModel(modelToApply);
+
       document.getElementById('prevDate').value = data.prevDate || '';
       document.getElementById('currDate').value = data.currDate || '';
       if (data.meterCharge !== undefined) document.getElementById('meterCharge').value = data.meterCharge;
@@ -1512,11 +1604,7 @@
           contributors: item.contributors || { sajen: '', jahangir: '', khairul: '', ratul: '' }
         }));
       } else {
-        rechargeList = [
-          { id: 1, date: '', amount: '', customVat: null, contributors: { sajen: '', jahangir: '', khairul: '', ratul: '' } },
-          { id: 2, date: '', amount: '', customVat: null, contributors: { sajen: '', jahangir: '', khairul: '', ratul: '' } },
-          { id: 3, date: '', amount: '', customVat: null, contributors: { sajen: '', jahangir: '', khairul: '', ratul: '' } }
-        ];
+        rechargeList = createDefaultRechargeList(DEFAULT_RECHARGE_CARDS);
       }
 
       if (data.readings) {
@@ -1621,6 +1709,8 @@
     window.downloadContainer = downloadContainer;
     window.showToast = showToast;
     window.handleAnalysisClick = handleAnalysisClick;
+    window.setBillingModel = setBillingModel;
+window.toggleBillingModel = toggleBillingModel;
 
     window.addEventListener('DOMContentLoaded', () => {
       initRechargeCards();
